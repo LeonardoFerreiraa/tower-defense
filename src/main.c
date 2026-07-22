@@ -4,6 +4,8 @@
 #include "raylib.h"
 #include "raymath.h"
 
+#define DEBUG_ENABLED
+
 #define TILE 80
 #define GRID_COLS 20
 #define GRID_ROWS 15
@@ -109,18 +111,11 @@ int nextInactiveSlot(void *arr, int count, size_t stride) {
   return -1;
 }
 
-Vector2 cellCenter(int col, int row) { 
-  return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f}; 
+Vector2 cellCenter(int col, int row) {
+  return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f};
 }
 
-void drawScene() {
-  for (int i = 0; i < pathCount - 1; i++) {
-    Vector2 startPos = path[i];
-    Vector2 endPos = path[i + 1];
-
-    DrawLineV(startPos, endPos, RED);
-  }
-}
+// ================================================== WAVE ==================================================
 
 bool waveEnded() {
   for (int i = 0; i < COUNT_OF(enemies); i++) {
@@ -132,13 +127,19 @@ bool waveEnded() {
   return true;
 }
 
-// ================================================== ENEMY ==================================================
-
-void drawEnemy(Enemy *enemy) {
-  Rectangle rectangle = {enemy->pos.x, enemy->pos.y, enemy->size.x, enemy->size.y};
-  DrawRectanglePro(rectangle, Vector2Scale(enemy->size, 0.5f), 0, enemy->color);
-  DrawTextEx(font, TextFormat("%d", enemy->lifePoints), Vector2Add(enemy->pos, (Vector2){-24, -7.5}), 16, 1, BLACK);
+void computeWaveSpawn(float dt) {
+  if (gameState.nextWaveSpawnTimer >= 0) {
+    gameState.nextWaveSpawnTimer += dt;
+    if (gameState.nextWaveSpawnTimer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
+      gameState.nextWaveSpawnTimer = -1;
+      gameState.wave++;
+      gameState.waitingNextWave = false;
+      enemyCount = 0;
+    }
+  }
 }
+
+// ================================================== ENEMY ==================================================
 
 void spawnEnemy() {
   if (gameState.waitingNextWave) {
@@ -163,6 +164,14 @@ void spawnEnemy() {
   }
 }
 
+void computeEnemySpawn(float dt) {
+  gameState.enemySpawnTimer += dt;
+  if (gameState.enemySpawnTimer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
+    gameState.enemySpawnTimer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
+    spawnEnemy();
+  }
+}
+
 void updateEnemiesState(float dt) {
   for (int i = 0; i < COUNT_OF(enemies); i++) {
     Enemy *enemy = &enemies[i];
@@ -182,6 +191,12 @@ void updateEnemiesState(float dt) {
       enemy->targetIndex++;
     }
   }
+}
+
+void drawEnemy(Enemy *enemy) {
+  Rectangle rectangle = {enemy->pos.x, enemy->pos.y, enemy->size.x, enemy->size.y};
+  DrawRectanglePro(rectangle, Vector2Scale(enemy->size, 0.5f), 0, enemy->color);
+  DrawTextEx(font, TextFormat("%d", enemy->lifePoints), Vector2Add(enemy->pos, (Vector2){-24, -7.5}), 16, 1, BLACK);
 }
 
 void drawEnemies() {
@@ -217,6 +232,14 @@ void spawnTower(Vector2 pos) {
   tower->size = (Vector2){65, 65};
   tower->color = BLUE;
   tower->active = true;
+  
+  TraceLog(LOG_DEBUG, "tower spawned (%f %f)", tower->pos.x, tower->pos.y);
+}
+
+void updateTowerState() {
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    spawnTower(GetMousePosition());
+  }
 }
 
 void drawTower(Tower *tower) {
@@ -234,6 +257,26 @@ void drawTowers() {
 }
 
 // ================================================== HUD ==================================================
+
+void drawDebugGrid() {
+  for (int col = 0; col <= GRID_COLS; col++) {
+    int x = col * TILE;
+    DrawLineDashed((Vector2){x, 0}, (Vector2){x, GRID_ROWS * TILE}, 5, 5, LIGHTGRAY);
+  }
+  for (int row = 0; row <= GRID_ROWS; row++) {
+    int y = row * TILE;
+    DrawLineDashed((Vector2){0, y}, (Vector2){GRID_COLS * TILE, y}, 5, 5, LIGHTGRAY);
+  }
+}
+
+void drawScene() {
+  for (int i = 0; i < pathCount - 1; i++) {
+    Vector2 startPos = path[i];
+    Vector2 endPos = path[i + 1];
+
+    DrawLineV(startPos, endPos, RED);
+  }
+}
 
 float drawStat(float x, const char *fmt, ...) {
   char buf[64];
@@ -266,17 +309,10 @@ void drawHud() {
 
   int maxHeight = GetScreenHeight();
   DrawRectangle(0, maxHeight - TILE, maxWidth, TILE, BROWN);
-}
 
-void drawDebugGrid() {
-  for (int col = 0; col <= GRID_COLS; col++) {
-    int x = col * TILE;
-    DrawLineDashed((Vector2){x, 0}, (Vector2){x, GRID_ROWS * TILE}, 5, 5, LIGHTGRAY);
-  }
-  for (int row = 0; row <= GRID_ROWS; row++) {
-    int y = row * TILE;
-    DrawLineDashed((Vector2){0, y}, (Vector2){GRID_COLS * TILE, y}, 5, 5, LIGHTGRAY);
-  }
+#ifdef DEBUG_ENABLED
+  drawDebugGrid();
+#endif
 }
 
 // ================================================== PATH ==================================================
@@ -330,27 +366,11 @@ void buildPath() {
 void updateState() {
   float dt = GetFrameTime();
 
-  gameState.enemySpawnTimer += dt;
-  if (gameState.enemySpawnTimer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
-    gameState.enemySpawnTimer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
-    spawnEnemy();
-  }
-
-  if (gameState.nextWaveSpawnTimer >= 0) {
-    gameState.nextWaveSpawnTimer += dt;
-    if (gameState.nextWaveSpawnTimer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
-      gameState.nextWaveSpawnTimer = -1;
-      gameState.wave++;
-      gameState.waitingNextWave = false;
-      enemyCount = 0;
-    }
-  }
+  computeEnemySpawn(dt);
+  computeWaveSpawn(dt);
 
   updateEnemiesState(dt);
-
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-    spawnTower(GetMousePosition());
-  }
+  updateTowerState();
 
   if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
     gameState.nextWaveSpawnTimer = 0;
@@ -361,6 +381,10 @@ int main(void) {
   InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
   SetTargetFPS(60);
   buildPath();
+
+#ifdef DEBUG_ENABLED
+  SetTraceLogLevel(LOG_DEBUG);
+#endif
 
   font = LoadFontEx("assets/fonts/PressStart2P-Regular.ttf", 16, NULL, 0);
 
@@ -375,7 +399,6 @@ int main(void) {
     drawTowers();
 
     drawHud();
-    drawDebugGrid();
 
     EndDrawing();
   }
