@@ -14,18 +14,30 @@
 
 #define COUNT_OF(a) (int)(sizeof(a) / sizeof((a)[0]))
 
-#define NEXT_TOWER_SLOT()                                                      \
-  nextInactiveSlot(towers, COUNT_OF(towers), sizeof(Tower))
-#define NEXT_ENEMY_SLOT()                                                      \
-  nextInactiveSlot(enemies, COUNT_OF(enemies), sizeof(Enemy))
+#define NEXT_TOWER_SLOT() nextInactiveSlot(towers, COUNT_OF(towers), sizeof(Tower))
+#define NEXT_ENEMY_SLOT() nextInactiveSlot(enemies, COUNT_OF(enemies), sizeof(Enemy))
 
-float speed = 200.0f;
-int wave = 1;
+// ================================================== SHARED STATE ==================================================
 
-float enemySpawnTimer = 0;
-float nextWaveSpawnTimer = -1;
+typedef struct {
+  float speed;
+  int wave;
+  float enemySpawnTimer;
+  float nextWaveSpawnTimer;
+  bool waitingNextWave;
+} GameState;
 
-bool waitingNextWave;
+GameState gameState = {
+    .speed = 200.0f,
+    .wave = 1,
+    .enemySpawnTimer = 0,
+    .nextWaveSpawnTimer = -1,
+    .waitingNextWave = false,
+};
+
+Font font;
+
+// ================================================== ENEMY ==================================================
 
 typedef struct {
   bool active;
@@ -39,6 +51,8 @@ typedef struct {
 Enemy enemies[64];
 int enemyCount = 0;
 
+// ================================================== TOWER ==================================================
+
 typedef struct {
   bool active;
   Vector2 pos;
@@ -48,26 +62,29 @@ typedef struct {
 Tower towers[64];
 int towerCount = 0;
 
+// ================================================== PATH ==================================================
+
+int pathMatrix[GRID_ROWS][GRID_COLS] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
+    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
+    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, //
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+};
 Vector2 path[GRID_ROWS * GRID_COLS];
 int pathCount = 0;
 
-int pathMatrix[GRID_ROWS][GRID_COLS] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0},
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0},
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
+// ================================================== PLAYER ==================================================
 
 typedef struct {
   int lifePoints;
@@ -79,7 +96,7 @@ Player player = {
     .gold = 1000        //
 };
 
-Font font;
+// ================================================== UTILITY ==================================================
 
 int nextInactiveSlot(void *arr, int count, size_t stride) {
   for (int i = 0; i < count; i++) {
@@ -92,8 +109,8 @@ int nextInactiveSlot(void *arr, int count, size_t stride) {
   return -1;
 }
 
-Vector2 cellCenter(int col, int row) {
-  return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f};
+Vector2 cellCenter(int col, int row) { 
+  return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f}; 
 }
 
 void drawScene() {
@@ -103,24 +120,6 @@ void drawScene() {
 
     DrawLineV(startPos, endPos, RED);
   }
-}
-
-void drawEnemy(Enemy *enemy) {
-  Rectangle rectangle = {enemy->pos.x, enemy->pos.y, enemy->size.x,
-                         enemy->size.y};
-  DrawRectanglePro(rectangle, Vector2Scale(enemy->size, 0.5f), 0, enemy->color);
-  DrawTextEx(font,                                         //
-             TextFormat("%d", enemy->lifePoints),          //
-             Vector2Add(enemy->pos, (Vector2){-24, -7.5}), //
-             16,                                           //
-             1,                                            //
-             BLACK);
-}
-
-void drawTower(Tower *tower) {
-  Rectangle rectangle = {tower->pos.x, tower->pos.y, tower->size.x,
-                         tower->size.y};
-  DrawRectanglePro(rectangle, Vector2Scale(tower->size, 0.5f), 0, tower->color);
 }
 
 bool waveEnded() {
@@ -133,8 +132,16 @@ bool waveEnded() {
   return true;
 }
 
+// ================================================== ENEMY ==================================================
+
+void drawEnemy(Enemy *enemy) {
+  Rectangle rectangle = {enemy->pos.x, enemy->pos.y, enemy->size.x, enemy->size.y};
+  DrawRectanglePro(rectangle, Vector2Scale(enemy->size, 0.5f), 0, enemy->color);
+  DrawTextEx(font, TextFormat("%d", enemy->lifePoints), Vector2Add(enemy->pos, (Vector2){-24, -7.5}), 16, 1, BLACK);
+}
+
 void spawnEnemy() {
-  if (waitingNextWave) {
+  if (gameState.waitingNextWave) {
     return;
   }
 
@@ -151,10 +158,42 @@ void spawnEnemy() {
   enemy->targetIndex = 1;
   enemy->lifePoints = 100;
 
-  if (++enemyCount > (ENEMY_PER_WAVE * wave)) {
-    waitingNextWave = true;
+  if (++enemyCount > (ENEMY_PER_WAVE * gameState.wave)) {
+    gameState.waitingNextWave = true;
   }
 }
+
+void updateEnemiesState(float dt) {
+  for (int i = 0; i < COUNT_OF(enemies); i++) {
+    Enemy *enemy = &enemies[i];
+    if (enemy->active == false) {
+      continue;
+    }
+
+    if (enemy->targetIndex == pathCount) {
+      enemy->active = false;
+      player.lifePoints -= enemy->lifePoints;
+      continue;
+    }
+
+    Vector2 target = path[enemy->targetIndex];
+    enemy->pos = Vector2MoveTowards(enemy->pos, target, gameState.speed * dt);
+    if (Vector2Equals(enemy->pos, target)) {
+      enemy->targetIndex++;
+    }
+  }
+}
+
+void drawEnemies() {
+  for (int i = 0; i < COUNT_OF(enemies); i++) {
+    Enemy *enemy = &enemies[i];
+    if (enemy->active) {
+      drawEnemy(enemy);
+    }
+  }
+}
+
+// ================================================== TOWER ==================================================
 
 void spawnTower(Vector2 pos) {
   if (towerCount >= COUNT_OF(towers)) {
@@ -180,6 +219,22 @@ void spawnTower(Vector2 pos) {
   tower->active = true;
 }
 
+void drawTower(Tower *tower) {
+  Rectangle rectangle = {tower->pos.x, tower->pos.y, tower->size.x, tower->size.y};
+  DrawRectanglePro(rectangle, Vector2Scale(tower->size, 0.5f), 0, tower->color);
+}
+
+void drawTowers() {
+  for (int i = 0; i < COUNT_OF(towers); i++) {
+    Tower *tower = &towers[i];
+    if (tower->active) {
+      drawTower(tower);
+    }
+  }
+}
+
+// ================================================== HUD ==================================================
+
 float drawStat(float x, const char *fmt, ...) {
   char buf[64];
   va_list args;
@@ -198,15 +253,14 @@ void drawHud() {
 
   float x = 10;
   x = drawStat(x, "Life: %d", player.lifePoints);
-  x = drawStat(x, "Wave: %d", wave);
+  x = drawStat(x, "Wave: %d", gameState.wave);
   x = drawStat(x, "Gold: %d", player.gold);
   if (waveEnded()) {
-    if (nextWaveSpawnTimer > 0) {
-      x = drawStat(x, "Next Wave In: %.0f",
-                   (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - nextWaveSpawnTimer));
+    if (gameState.nextWaveSpawnTimer > 0) {
+      x = drawStat(x, "Next Wave In: %.0f", (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - gameState.nextWaveSpawnTimer));
     }
   } else {
-    int remainingEnemies = ENEMY_PER_WAVE * wave - enemyCount + 1;
+    int remainingEnemies = ENEMY_PER_WAVE * gameState.wave - enemyCount + 1;
     x = drawStat(x, "Remaining Enemies: %d", remainingEnemies);
   }
 
@@ -214,87 +268,18 @@ void drawHud() {
   DrawRectangle(0, maxHeight - TILE, maxWidth, TILE, BROWN);
 }
 
-void updateEnemiesState(float dt) {
-  for (int i = 0; i < COUNT_OF(enemies); i++) {
-    Enemy *enemy = &enemies[i];
-    if (enemy->active == false) {
-      continue;
-    }
-
-    if (enemy->targetIndex == pathCount) {
-      enemy->active = false;
-      player.lifePoints -= enemy->lifePoints;
-      continue;
-    }
-
-    Vector2 target = path[enemy->targetIndex];
-    enemy->pos = Vector2MoveTowards(enemy->pos, target, speed * dt);
-    if (Vector2Equals(enemy->pos, target)) {
-      enemy->targetIndex++;
-    }
-  }
-}
-
-void updateState() {
-  float dt = GetFrameTime();
-
-  enemySpawnTimer += dt;
-  if (enemySpawnTimer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
-    enemySpawnTimer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
-    spawnEnemy();
-  }
-
-  if (nextWaveSpawnTimer >= 0) {
-    nextWaveSpawnTimer += dt;
-    if (nextWaveSpawnTimer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
-      nextWaveSpawnTimer = -1;
-      wave++;
-      waitingNextWave = false;
-      enemyCount = 0;
-    }
-  }
-
-  updateEnemiesState(dt);
-
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-    spawnTower(GetMousePosition());
-  }
-
-  if (waitingNextWave && waveEnded() && nextWaveSpawnTimer < 0) {
-    nextWaveSpawnTimer = 0;
-  }
-}
-
-void drawEnemies() {
-  for (int i = 0; i < COUNT_OF(enemies); i++) {
-    Enemy *enemy = &enemies[i];
-    if (enemy->active) {
-      drawEnemy(enemy);
-    }
-  }
-}
-
-void drawTowers() {
-  for (int i = 0; i < COUNT_OF(towers); i++) {
-    Tower *tower = &towers[i];
-    if (tower->active) {
-      drawTower(tower);
-    }
-  }
-}
-
 void drawDebugGrid() {
   for (int col = 0; col <= GRID_COLS; col++) {
     int x = col * TILE;
-    DrawLineDashed((Vector2){x, 0}, (Vector2){x, GRID_ROWS * TILE}, 5, 5,
-                   LIGHTGRAY);
+    DrawLineDashed((Vector2){x, 0}, (Vector2){x, GRID_ROWS * TILE}, 5, 5, LIGHTGRAY);
   }
   for (int row = 0; row <= GRID_ROWS; row++) {
     int y = row * TILE;
-    DrawLineDashed((Vector2){0, y}, (Vector2){GRID_COLS * TILE, y}, 5, 5,
-                   LIGHTGRAY);
+    DrawLineDashed((Vector2){0, y}, (Vector2){GRID_COLS * TILE, y}, 5, 5, LIGHTGRAY);
   }
 }
+
+// ================================================== PATH ==================================================
 
 void buildPath() {
   int dCol[] = {0, 0, +1, -1};
@@ -338,6 +323,38 @@ void buildPath() {
       break;
     }
   } while (pathCount < COUNT_OF(path));
+}
+
+// ================================================== MAIN ==================================================
+
+void updateState() {
+  float dt = GetFrameTime();
+
+  gameState.enemySpawnTimer += dt;
+  if (gameState.enemySpawnTimer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
+    gameState.enemySpawnTimer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
+    spawnEnemy();
+  }
+
+  if (gameState.nextWaveSpawnTimer >= 0) {
+    gameState.nextWaveSpawnTimer += dt;
+    if (gameState.nextWaveSpawnTimer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
+      gameState.nextWaveSpawnTimer = -1;
+      gameState.wave++;
+      gameState.waitingNextWave = false;
+      enemyCount = 0;
+    }
+  }
+
+  updateEnemiesState(dt);
+
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    spawnTower(GetMousePosition());
+  }
+
+  if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
+    gameState.nextWaveSpawnTimer = 0;
+  }
 }
 
 int main(void) {
