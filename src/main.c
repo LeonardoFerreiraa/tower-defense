@@ -8,21 +8,31 @@
 #define GRID_COLS 20
 #define GRID_ROWS 15
 
-#define SPAWN_AT_SECONDS 1
+#define ENEMY_SPAWN_DELAY_IN_SECONDS 1
+#define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
+#define ENEMY_PER_WAVE 2
 
 #define COUNT_OF(a) (int)(sizeof(a) / sizeof((a)[0]))
+
+#define NEXT_TOWER_SLOT()                                                      \
+  nextInactiveSlot(towers, COUNT_OF(towers), sizeof(Tower))
+#define NEXT_ENEMY_SLOT()                                                      \
+  nextInactiveSlot(enemies, COUNT_OF(enemies), sizeof(Enemy))
 
 float speed = 200.0f;
 int wave = 1;
 
-float spawnTimer = 0;
+float enemySpawnTimer = 0;
+float nextWaveSpawnTimer = -1;
+
+bool waitingNextWave;
 
 typedef struct {
+  bool active;
   Vector2 pos;
   Vector2 size;
   Color color;
   int targetIndex;
-  bool active;
   int lifePoints;
 } Enemy;
 
@@ -30,10 +40,10 @@ Enemy enemies[64];
 int enemyCount = 0;
 
 typedef struct {
+  bool active;
   Vector2 pos;
   Vector2 size;
   Color color;
-  bool active;
 } Tower;
 Tower towers[64];
 int towerCount = 0;
@@ -71,6 +81,17 @@ Player player = {
 
 Font font;
 
+int nextInactiveSlot(void *arr, int count, size_t stride) {
+  for (int i = 0; i < count; i++) {
+    bool active = *(bool *)((char *)arr + i * stride);
+    if (!active) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 Vector2 cellCenter(int col, int row) {
   return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f};
 }
@@ -102,18 +123,37 @@ void drawTower(Tower *tower) {
   DrawRectanglePro(rectangle, Vector2Scale(tower->size, 0.5f), 0, tower->color);
 }
 
+bool waveEnded() {
+  for (int i = 0; i < COUNT_OF(enemies); i++) {
+    if (enemies[i].active) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 void spawnEnemy() {
-  if (enemyCount >= COUNT_OF(enemies)) {
+  if (waitingNextWave) {
     return;
   }
 
-  Enemy *enemy = &enemies[enemyCount++];
+  int slot = NEXT_ENEMY_SLOT();
+  if (slot < 0) {
+    return;
+  }
+
+  Enemy *enemy = &enemies[slot];
+  enemy->active = true;
   enemy->pos = path[0];
   enemy->size = (Vector2){65, 65};
   enemy->color = RED;
   enemy->targetIndex = 1;
-  enemy->active = true;
   enemy->lifePoints = 100;
+
+  if (++enemyCount > (ENEMY_PER_WAVE * wave)) {
+    waitingNextWave = true;
+  }
 }
 
 void spawnTower(Vector2 pos) {
@@ -124,12 +164,16 @@ void spawnTower(Vector2 pos) {
   int posX = pos.x / TILE;
   int posY = pos.y / TILE;
 
-  printf("posY:%d\n", posY);
   if (posY <= 1 || posY >= GRID_ROWS - 1 || pathMatrix[posY][posX]) {
     return;
   }
 
-  Tower *tower = &towers[towerCount++];
+  int slot = NEXT_TOWER_SLOT();
+  if (slot < 0) {
+    return;
+  }
+
+  Tower *tower = &towers[slot];
   tower->pos = cellCenter(posX, posY);
   tower->size = (Vector2){65, 65};
   tower->color = BLUE;
@@ -144,7 +188,7 @@ float drawStat(float x, const char *fmt, ...) {
   va_end(args);
 
   Vector2 size = MeasureTextEx(font, buf, 16, 1);
-  DrawTextEx(font, buf, (Vector2){x, 15}, 16, 1, RAYWHITE);
+  DrawTextEx(font, buf, (Vector2){x, (TILE - size.y) / 2}, 16, 1, RAYWHITE);
   return x + size.x + 15;
 }
 
@@ -153,23 +197,24 @@ void drawHud() {
   DrawRectangle(0, 0, maxWidth, TILE, BROWN);
 
   float x = 10;
-  x = drawStat(x, "Life: %d |", player.lifePoints);
-  x = drawStat(x, "Wave: %d |", wave);
+  x = drawStat(x, "Life: %d", player.lifePoints);
+  x = drawStat(x, "Wave: %d", wave);
   x = drawStat(x, "Gold: %d", player.gold);
+  if (waveEnded()) {
+    if (nextWaveSpawnTimer > 0) {
+      x = drawStat(x, "Next Wave In: %.0f",
+                   (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - nextWaveSpawnTimer));
+    }
+  } else {
+    int remainingEnemies = ENEMY_PER_WAVE * wave - enemyCount + 1;
+    x = drawStat(x, "Remaining Enemies: %d", remainingEnemies);
+  }
 
   int maxHeight = GetScreenHeight();
   DrawRectangle(0, maxHeight - TILE, maxWidth, TILE, BROWN);
 }
 
-void updateState() {
-  float dt = GetFrameTime();
-
-  spawnTimer += dt;
-  if (spawnTimer >= SPAWN_AT_SECONDS) {
-    spawnTimer -= SPAWN_AT_SECONDS;
-    spawnEnemy();
-  }
-
+void updateEnemiesState(float dt) {
   for (int i = 0; i < COUNT_OF(enemies); i++) {
     Enemy *enemy = &enemies[i];
     if (enemy->active == false) {
@@ -188,9 +233,35 @@ void updateState() {
       enemy->targetIndex++;
     }
   }
+}
+
+void updateState() {
+  float dt = GetFrameTime();
+
+  enemySpawnTimer += dt;
+  if (enemySpawnTimer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
+    enemySpawnTimer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
+    spawnEnemy();
+  }
+
+  if (nextWaveSpawnTimer >= 0) {
+    nextWaveSpawnTimer += dt;
+    if (nextWaveSpawnTimer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
+      nextWaveSpawnTimer = -1;
+      wave++;
+      waitingNextWave = false;
+      enemyCount = 0;
+    }
+  }
+
+  updateEnemiesState(dt);
 
   if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
     spawnTower(GetMousePosition());
+  }
+
+  if (waitingNextWave && waveEnded() && nextWaveSpawnTimer < 0) {
+    nextWaveSpawnTimer = 0;
   }
 }
 
