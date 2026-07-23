@@ -15,10 +15,6 @@
 
 #define COUNT_OF(a) (int)(sizeof(a) / sizeof((a)[0]))
 
-#define NEXT_BULLET_SLOT() nextInactiveSlot(bullets, COUNT_OF(bullets), sizeof(Bullet))
-#define NEXT_TOWER_SLOT() nextInactiveSlot(towers, COUNT_OF(towers), sizeof(Tower))
-#define NEXT_ENEMY_SLOT() nextInactiveSlot(enemies, COUNT_OF(enemies), sizeof(Enemy))
-
 // ================================================== SHARED STATE ==================================================
 
 typedef struct {
@@ -85,6 +81,8 @@ int enemyCount = 0;
 
 typedef struct {
   bool active;
+  unsigned int entityId;
+
   Vector2 pos;
   Vector2 size;
   Color color;
@@ -98,6 +96,8 @@ Tower towers[64];
 
 typedef struct {
   bool active;
+  unsigned int entityId;
+
   Vector2 pos;
   float size;
   Color color;
@@ -170,16 +170,56 @@ void *resolveEntity(EntityWrapper entityWrapper) {
     }
     return NULL;
   }
-  case ENTITY_WRAPPER_TYPE_TOWER:
-  case ENTITY_WRAPPER_TYPE_BULLET:
-    break;
+  case ENTITY_WRAPPER_TYPE_TOWER: {
+    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= COUNT_OF(towers)) {
+      return NULL;
+    }
+
+    Tower *tower = &towers[entityWrapper.arrayIndex];
+    if (tower->active == true && tower->entityId == entityWrapper.id) {
+      return tower;
+    }
+    return NULL;
   }
+  case ENTITY_WRAPPER_TYPE_BULLET: {
+    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= COUNT_OF(bullets)) {
+      return NULL;
+    }
+
+    Bullet *bullet = &bullets[entityWrapper.arrayIndex];
+    if (bullet->active == true && bullet->entityId == entityWrapper.id) {
+      return bullet;
+    }
+    return NULL;
+  }
+  }
+
   return NULL;
 }
 
 unsigned int nextEntityId() {
   static unsigned int seq = 0;
   return ++seq;
+}
+
+#define SPAWN(list) spawnEntity((list), COUNT_OF(list), sizeof((list)[0]))
+
+typedef struct {
+  bool active;
+  unsigned int entityId;
+} EntityBase;
+
+void *spawnEntity(void *list, int count, size_t stride) {
+  int slot = nextInactiveSlot(list, count, stride);
+  if (slot < 0) {
+    return NULL;
+  }
+
+  EntityBase *entity = (EntityBase *)((char *)list + slot * stride);
+  entity->active = true;
+  entity->entityId = nextEntityId();
+
+  return entity;
 }
 
 // ================================================== WAVE ==================================================
@@ -194,7 +234,7 @@ bool waveEnded() {
   return true;
 }
 
-void computeWaveSpawn(float dt) {
+void computeSpawnWave(float dt) {
   if (gameState.nextWaveSpawnTimer >= 0) {
     gameState.nextWaveSpawnTimer += dt;
     if (gameState.nextWaveSpawnTimer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
@@ -213,14 +253,11 @@ void spawnEnemy() {
     return;
   }
 
-  int slot = NEXT_ENEMY_SLOT();
-  if (slot < 0) {
+  Enemy *enemy = SPAWN(enemies);
+  if (enemy == NULL) {
     return;
   }
 
-  Enemy *enemy = &enemies[slot];
-  enemy->active = true;
-  enemy->entityId = nextEntityId();
   enemy->type = GetRandomValue(0, ENEMY_TYPE_COUNT - 2);
   enemy->pos = path[0];
   enemy->size = (Vector2){65, 65};
@@ -233,7 +270,7 @@ void spawnEnemy() {
   }
 }
 
-void computeEnemySpawn(float dt) {
+void computeSpawnEnemy(float dt) {
   gameState.enemySpawnTimer += dt;
   if (gameState.enemySpawnTimer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
     gameState.enemySpawnTimer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
@@ -292,16 +329,14 @@ void spawnTower(Vector2 pos) {
   }
   player.gold -= 100;
 
-  int slot = NEXT_TOWER_SLOT();
-  if (slot < 0) {
+  Tower *tower = SPAWN(towers);
+  if (tower == NULL) {
     return;
   }
 
-  Tower *tower = &towers[slot];
   tower->pos = cellCenter(posX, posY);
   tower->size = (Vector2){65, 65};
   tower->color = BLUE;
-  tower->active = true;
   tower->range = TILE / 2.0f + TILE * 2;
   tower->fireRate = 1.0f / 2;
   tower->bulletCooldown = tower->fireRate;
@@ -329,23 +364,22 @@ void drawTowers() {
     }
   }
 }
+
 // ================================================== BULLET ==================================================
 
 void spawnBullet(Tower *tower, EntityWrapper target) {
-  int slot = NEXT_BULLET_SLOT();
-  if (slot < 0) {
+  Bullet *bullet = SPAWN(bullets);
+  if (bullet == NULL) {
     return;
   }
 
-  Bullet *bullet = &bullets[slot];
-  bullet->active = true;
   bullet->pos = tower->pos;
   bullet->size = 5.0f;
   bullet->color = BLACK;
   bullet->target = target;
 }
 
-void computeNewBullets(float dt) {
+void computeSpawnBullet(float dt) {
   for (int i = 0; i < COUNT_OF(towers); i++) {
     Tower *tower = &towers[i];
     if (!tower->active) {
@@ -424,7 +458,7 @@ void drawBullets() {
 }
 
 void computeBullet(float dt) {
-  computeNewBullets(dt);
+  computeSpawnBullet(dt);
   computeBulletsMovement(dt);
 }
 
@@ -544,8 +578,8 @@ void buildPath() {
 void updateState() {
   float dt = GetFrameTime();
 
-  computeEnemySpawn(dt);
-  computeWaveSpawn(dt);
+  computeSpawnEnemy(dt);
+  computeSpawnWave(dt);
   computeBullet(dt);
 
   computeEnemiesMovement(dt);
