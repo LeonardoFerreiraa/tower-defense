@@ -1,7 +1,7 @@
 RAYLIB_PREFIX = /opt/homebrew
 
 CC = cc
-CFLAGS = -std=c99 -Wall -Wextra -I$(RAYLIB_PREFIX)/include -Isrc
+CFLAGS = -std=c99 -Wall -Wextra -Wimplicit-fallthrough -I$(RAYLIB_PREFIX)/include -Isrc
 LDFLAGS = -L$(RAYLIB_PREFIX)/lib -lraylib
 
 BUILD = build
@@ -20,9 +20,13 @@ $(BUILD)/%.o: src/%.c
 run: $(TARGET)
 	./$(TARGET)
 
+# build com logs de debug e seed fixa (#ifdef DEBUG_ENABLED)
+debug: CFLAGS += -DDEBUG_ENABLED -g -O0
+debug: clean $(TARGET)
+
 clean:
 	rm -rf $(BUILD)
 
 -include $(DEP)
 
-.PHONY: run clean
+.PHONY: run debug clean

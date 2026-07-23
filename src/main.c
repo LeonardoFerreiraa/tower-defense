@@ -1,10 +1,9 @@
 #include <stdarg.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "raylib.h"
 #include "raymath.h"
-
-#define DEBUG_ENABLED
 
 #define TILE 80
 #define GRID_COLS 20
@@ -12,10 +11,11 @@
 
 #define ENEMY_SPAWN_DELAY_IN_SECONDS 1
 #define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
-#define ENEMY_PER_WAVE 2
+#define ENEMY_PER_WAVE 5
 
 #define COUNT_OF(a) (int)(sizeof(a) / sizeof((a)[0]))
 
+#define NEXT_BULLET_SLOT() nextInactiveSlot(bullets, COUNT_OF(bullets), sizeof(Bullet))
 #define NEXT_TOWER_SLOT() nextInactiveSlot(towers, COUNT_OF(towers), sizeof(Tower))
 #define NEXT_ENEMY_SLOT() nextInactiveSlot(enemies, COUNT_OF(enemies), sizeof(Enemy))
 
@@ -39,15 +39,43 @@ GameState gameState = {
 
 Font font;
 
+// ================================================== ENTITY_WRAPPER ==================================================
+
+typedef enum { ENTITY_WRAPPER_TYPE_TOWER, ENTITY_WRAPPER_TYPE_ENEMY, ENTITY_WRAPPER_TYPE_BULLET } EntityWrapperType;
+
+typedef struct {
+  EntityWrapperType type;
+  unsigned int id;
+  int arrayIndex;
+} EntityWrapper;
+
 // ================================================== ENEMY ==================================================
+
+typedef enum { ENEMY_NORMAL, ENEMY_RUNNER, ENEMY_TANK, ENEMY_BOSS, ENEMY_TYPE_COUNT } EnemyType;
+typedef struct {
+  int healthPoints;
+  float speedMultiplier;
+  int gold;
+  int damage;
+} EnemyStat;
+
+EnemyStat enemyStats[] = {
+    [ENEMY_NORMAL] = {100, 1, 20, 10},
+    [ENEMY_RUNNER] = {50, 1.5, 20, 10},
+    [ENEMY_TANK] = {200, 0.5, 20, 10},
+    [ENEMY_BOSS] = {100, 1, 20, 10},
+};
 
 typedef struct {
   bool active;
+  unsigned int entityId;
+
   Vector2 pos;
   Vector2 size;
   Color color;
   int targetIndex;
   int lifePoints;
+  EnemyType type;
 } Enemy;
 
 Enemy enemies[64];
@@ -60,9 +88,22 @@ typedef struct {
   Vector2 pos;
   Vector2 size;
   Color color;
+  float range;
+  float fireRate;
+  float bulletCooldown;
 } Tower;
 Tower towers[64];
-int towerCount = 0;
+
+// ================================================== BULLET ==================================================
+
+typedef struct {
+  bool active;
+  Vector2 pos;
+  float size;
+  Color color;
+  EntityWrapper target;
+} Bullet;
+Bullet bullets[128];
 
 // ================================================== PATH ==================================================
 
@@ -115,6 +156,32 @@ Vector2 cellCenter(int col, int row) {
   return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f};
 }
 
+void *resolveEntity(EntityWrapper entityWrapper) {
+  switch (entityWrapper.type) {
+
+  case ENTITY_WRAPPER_TYPE_ENEMY: {
+    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= COUNT_OF(enemies)) {
+      return NULL;
+    }
+
+    Enemy *enemy = &enemies[entityWrapper.arrayIndex];
+    if (enemy->active == true && enemy->entityId == entityWrapper.id) {
+      return enemy;
+    }
+    return NULL;
+  }
+  case ENTITY_WRAPPER_TYPE_TOWER:
+  case ENTITY_WRAPPER_TYPE_BULLET:
+    break;
+  }
+  return NULL;
+}
+
+unsigned int nextEntityId() {
+  static unsigned int seq = 0;
+  return ++seq;
+}
+
 // ================================================== WAVE ==================================================
 
 bool waveEnded() {
@@ -153,11 +220,13 @@ void spawnEnemy() {
 
   Enemy *enemy = &enemies[slot];
   enemy->active = true;
+  enemy->entityId = nextEntityId();
+  enemy->type = GetRandomValue(0, ENEMY_TYPE_COUNT - 2);
   enemy->pos = path[0];
   enemy->size = (Vector2){65, 65};
   enemy->color = RED;
   enemy->targetIndex = 1;
-  enemy->lifePoints = 100;
+  enemy->lifePoints = enemyStats[enemy->type].healthPoints;
 
   if (++enemyCount > (ENEMY_PER_WAVE * gameState.wave)) {
     gameState.waitingNextWave = true;
@@ -172,7 +241,7 @@ void computeEnemySpawn(float dt) {
   }
 }
 
-void updateEnemiesState(float dt) {
+void computeEnemiesMovement(float dt) {
   for (int i = 0; i < COUNT_OF(enemies); i++) {
     Enemy *enemy = &enemies[i];
     if (enemy->active == false) {
@@ -181,12 +250,12 @@ void updateEnemiesState(float dt) {
 
     if (enemy->targetIndex == pathCount) {
       enemy->active = false;
-      player.lifePoints -= enemy->lifePoints;
+      player.lifePoints -= enemyStats[enemy->type].damage;
       continue;
     }
 
     Vector2 target = path[enemy->targetIndex];
-    enemy->pos = Vector2MoveTowards(enemy->pos, target, gameState.speed * dt);
+    enemy->pos = Vector2MoveTowards(enemy->pos, target, (gameState.speed * enemyStats[enemy->type].speedMultiplier) * dt);
     if (Vector2Equals(enemy->pos, target)) {
       enemy->targetIndex++;
     }
@@ -211,16 +280,17 @@ void drawEnemies() {
 // ================================================== TOWER ==================================================
 
 void spawnTower(Vector2 pos) {
-  if (towerCount >= COUNT_OF(towers)) {
-    return;
-  }
-
   int posX = pos.x / TILE;
   int posY = pos.y / TILE;
 
   if (posY <= 1 || posY >= GRID_ROWS - 1 || pathMatrix[posY][posX]) {
     return;
   }
+
+  if (player.gold < 100) {
+    return;
+  }
+  player.gold -= 100;
 
   int slot = NEXT_TOWER_SLOT();
   if (slot < 0) {
@@ -232,7 +302,10 @@ void spawnTower(Vector2 pos) {
   tower->size = (Vector2){65, 65};
   tower->color = BLUE;
   tower->active = true;
-  
+  tower->range = TILE / 2.0f + TILE * 2;
+  tower->fireRate = 1.0f / 2;
+  tower->bulletCooldown = tower->fireRate;
+
   TraceLog(LOG_DEBUG, "tower spawned (%f %f)", tower->pos.x, tower->pos.y);
 }
 
@@ -244,7 +317,8 @@ void updateTowerState() {
 
 void drawTower(Tower *tower) {
   Rectangle rectangle = {tower->pos.x, tower->pos.y, tower->size.x, tower->size.y};
-  DrawRectanglePro(rectangle, Vector2Scale(tower->size, 0.5f), 0, tower->color);
+  Vector2 origin = Vector2Scale(tower->size, 0.5f);
+  DrawRectanglePro(rectangle, origin, 0, tower->color);
 }
 
 void drawTowers() {
@@ -254,6 +328,104 @@ void drawTowers() {
       drawTower(tower);
     }
   }
+}
+// ================================================== BULLET ==================================================
+
+void spawnBullet(Tower *tower, EntityWrapper target) {
+  int slot = NEXT_BULLET_SLOT();
+  if (slot < 0) {
+    return;
+  }
+
+  Bullet *bullet = &bullets[slot];
+  bullet->active = true;
+  bullet->pos = tower->pos;
+  bullet->size = 5.0f;
+  bullet->color = BLACK;
+  bullet->target = target;
+}
+
+void computeNewBullets(float dt) {
+  for (int i = 0; i < COUNT_OF(towers); i++) {
+    Tower *tower = &towers[i];
+    if (!tower->active) {
+      continue;
+    }
+
+    tower->bulletCooldown += dt;
+    if (tower->bulletCooldown < tower->fireRate) {
+      continue;
+    }
+    tower->bulletCooldown -= tower->fireRate;
+
+    for (int j = 0; j < COUNT_OF(enemies); j++) {
+      Enemy *enemy = &enemies[j];
+      if (!enemy->active) {
+        continue;
+      }
+
+      float distance = Vector2Distance(tower->pos, enemy->pos);
+      if (distance < tower->range) {
+        EntityWrapper entityWrapper = {.type = ENTITY_WRAPPER_TYPE_ENEMY, .id = enemy->entityId, .arrayIndex = j};
+        spawnBullet(tower, entityWrapper);
+        break;
+      }
+    }
+  }
+}
+
+void computeBulletHit(Bullet *bullet) {
+  Enemy *enemy = resolveEntity(bullet->target);
+  if (enemy == NULL) {
+    bullet->active = false;
+    return;
+  }
+
+  bullet->active = false;
+  enemy->lifePoints -= 10;
+
+  if (enemy->lifePoints <= 0) {
+    enemy->active = false;
+    player.gold += enemyStats[enemy->type].gold;
+  }
+}
+
+void computeBulletsMovement(float dt) {
+  for (int i = 0; i < COUNT_OF(bullets); i++) {
+    Bullet *bullet = &bullets[i];
+    if (!bullet->active) {
+      continue;
+    }
+    Enemy *enemy = resolveEntity(bullet->target);
+    if (enemy == NULL) {
+      bullet->active = false;
+      continue;
+    }
+
+    Vector2 target = enemy->pos;
+    bullet->pos = Vector2MoveTowards(bullet->pos, target, gameState.speed * 4 * dt);
+    if (Vector2Equals(bullet->pos, target)) {
+      computeBulletHit(bullet);
+    }
+  }
+}
+
+void drawBullet(Bullet bullet) {
+  DrawCircleV(bullet.pos, bullet.size, bullet.color);
+}
+
+void drawBullets() {
+  for (int i = 0; i < COUNT_OF(bullets); i++) {
+    Bullet bullet = bullets[i];
+    if (bullet.active) {
+      drawBullet(bullet);
+    }
+  }
+}
+
+void computeBullet(float dt) {
+  computeNewBullets(dt);
+  computeBulletsMovement(dt);
 }
 
 // ================================================== HUD ==================================================
@@ -266,6 +438,12 @@ void drawDebugGrid() {
   for (int row = 0; row <= GRID_ROWS; row++) {
     int y = row * TILE;
     DrawLineDashed((Vector2){0, y}, (Vector2){GRID_COLS * TILE, y}, 5, 5, LIGHTGRAY);
+  }
+  for (int i = 0; i < COUNT_OF(towers); i++) {
+    Tower tower = towers[i];
+    if (tower.active) {
+      DrawCircleLinesV(tower.pos, tower.range, LIGHTGRAY);
+    }
   }
 }
 
@@ -304,7 +482,7 @@ void drawHud() {
     }
   } else {
     int remainingEnemies = ENEMY_PER_WAVE * gameState.wave - enemyCount + 1;
-    x = drawStat(x, "Remaining Enemies: %d", remainingEnemies);
+    x = drawStat(x, "Remaining Enemies To Spawn: %d", remainingEnemies);
   }
 
   int maxHeight = GetScreenHeight();
@@ -368,8 +546,9 @@ void updateState() {
 
   computeEnemySpawn(dt);
   computeWaveSpawn(dt);
+  computeBullet(dt);
 
-  updateEnemiesState(dt);
+  computeEnemiesMovement(dt);
   updateTowerState();
 
   if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
@@ -378,13 +557,20 @@ void updateState() {
 }
 
 int main(void) {
-  InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
-  SetTargetFPS(60);
-  buildPath();
-
 #ifdef DEBUG_ENABLED
   SetTraceLogLevel(LOG_DEBUG);
 #endif
+
+  unsigned int seed = (unsigned int)time(NULL);
+#ifdef DEBUG_ENABLED
+  seed = 123456;
+#endif
+
+  TraceLog(LOG_INFO, "seed: %u", seed);
+  SetRandomSeed(seed);
+  InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
+  SetTargetFPS(60);
+  buildPath();
 
   font = LoadFontEx("assets/fonts/PressStart2P-Regular.ttf", 16, NULL, 0);
 
@@ -397,6 +583,7 @@ int main(void) {
     drawScene();
     drawEnemies();
     drawTowers();
+    drawBullets();
 
     drawHud();
 
