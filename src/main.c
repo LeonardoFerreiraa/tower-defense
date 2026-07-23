@@ -47,7 +47,7 @@ typedef struct {
 
 // ================================================== ENEMY ==================================================
 
-typedef enum { ENEMY_NORMAL, ENEMY_RUNNER, ENEMY_TANK, ENEMY_BOSS, ENEMY_TYPE_COUNT } EnemyType;
+typedef enum { ENEMY_TYPE_NORMAL, ENEMY_TYPE_RUNNER, ENEMY_TYPE_TANK, ENEMY_TYPE_BOSS, ENEMY_TYPE_COUNT } EnemyType;
 typedef struct {
   int healthPoints;
   float speedMultiplier;
@@ -56,11 +56,13 @@ typedef struct {
 } EnemyStat;
 
 EnemyStat enemyStats[] = {
-    [ENEMY_NORMAL] = {100, 1, 20, 10},
-    [ENEMY_RUNNER] = {50, 1.5, 20, 10},
-    [ENEMY_TANK] = {200, 0.5, 20, 10},
-    [ENEMY_BOSS] = {100, 1, 20, 10},
+    [ENEMY_TYPE_NORMAL] = {100, 1, 20, 10},
+    [ENEMY_TYPE_RUNNER] = {50, 1.5, 20, 10},
+    [ENEMY_TYPE_TANK] = {200, 0.5, 20, 10},
+    [ENEMY_TYPE_BOSS] = {100, 1, 20, 10},
 };
+
+Texture2D enemyTextures[ENEMY_TYPE_COUNT];
 
 typedef struct {
   bool active;
@@ -72,6 +74,7 @@ typedef struct {
   int targetIndex;
   int lifePoints;
   EnemyType type;
+  float angle;
 } Enemy;
 
 Enemy enemies[64];
@@ -79,6 +82,7 @@ int enemyCount = 0;
 
 // ================================================== TOWER ==================================================
 
+typedef enum { TOWER_TYPE_NORMAL, TOWER_TYPE_DOUBLE, TOWER_TYPE_COUNT } TowerType;
 typedef struct {
   bool active;
   unsigned int entityId;
@@ -89,9 +93,13 @@ typedef struct {
   float range;
   float fireRate;
   float bulletCooldown;
+  TowerType type;
+  float angle;
 } Tower;
 Tower towers[64];
 
+Texture2D towerTextures[TOWER_TYPE_COUNT];
+ 
 // ================================================== BULLET ==================================================
 
 typedef struct {
@@ -296,13 +304,19 @@ void computeEnemiesMovement(float dt) {
     if (Vector2Equals(enemy->pos, target)) {
       enemy->targetIndex++;
     }
+
+    Vector2 newTarget = path[enemy->targetIndex];
+    Vector2 dir = Vector2Subtract(newTarget, enemy->pos);
+    enemy->angle = atan2f(dir.y, dir.x) * RAD2DEG;
   }
 }
 
 void drawEnemy(Enemy *enemy) {
-  Rectangle rectangle = {enemy->pos.x, enemy->pos.y, enemy->size.x, enemy->size.y};
-  DrawRectanglePro(rectangle, Vector2Scale(enemy->size, 0.5f), 0, enemy->color);
-  DrawTextEx(font, TextFormat("%d", enemy->lifePoints), Vector2Add(enemy->pos, (Vector2){-24, -7.5}), 16, 1, BLACK);
+  Texture2D texture = enemyTextures[enemy->type];
+  Rectangle source = {0, 0, texture.width, texture.height};
+  Rectangle dest = {enemy->pos.x, enemy->pos.y, enemy->size.x, enemy->size.y};
+  Vector2 origin = Vector2Scale(enemy->size, 0.5f);
+  DrawTexturePro(texture, source, dest, origin, enemy->angle, RAYWHITE);
 }
 
 void drawEnemies() {
@@ -315,6 +329,25 @@ void drawEnemies() {
 }
 
 // ================================================== TOWER ==================================================
+
+bool retrieveTowerTarget(Tower *tower, EntityWrapper *out) {
+  for (int i = 0; i < COUNT_OF(enemies); i++) {
+    Enemy *enemy = &enemies[i];
+    if (!enemy->active) {
+      continue;
+    }
+
+    float distance = Vector2Distance(tower->pos, enemy->pos);
+    if (distance < tower->range) {
+      out->type = ENTITY_WRAPPER_TYPE_ENEMY;
+      out->id = enemy->entityId;
+      out->arrayIndex = i;
+      return true;
+    }
+  }
+
+  return false;
+}
 
 void spawnTower(Vector2 pos) {
   int posX = pos.x / TILE;
@@ -340,20 +373,46 @@ void spawnTower(Vector2 pos) {
   tower->range = TILE / 2.0f + TILE * 2;
   tower->fireRate = 1.0f / 2;
   tower->bulletCooldown = tower->fireRate;
+  tower->type = TOWER_TYPE_NORMAL;
 
   TraceLog(LOG_DEBUG, "tower spawned (%f %f)", tower->pos.x, tower->pos.y);
+}
+
+void computeTowerAngle() {
+  for (int i = 0; i < COUNT_OF(towers); i++) {
+    Tower *tower = &towers[i];
+    if (!tower->active) {
+      continue;
+    }
+
+    EntityWrapper entityWrapper;
+    if (!retrieveTowerTarget(tower, &entityWrapper)) {
+      continue;
+    }
+
+    Enemy *enemy = resolveEntity(entityWrapper);
+    if (enemy == NULL) {
+      continue;
+    }
+
+    Vector2 dir = Vector2Subtract(enemy->pos, tower->pos);
+    tower->angle = (atan2f(dir.y, dir.x) * RAD2DEG) + 90;
+  }
 }
 
 void updateTowerState() {
   if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
     spawnTower(GetMousePosition());
   }
+  computeTowerAngle();
 }
 
 void drawTower(Tower *tower) {
-  Rectangle rectangle = {tower->pos.x, tower->pos.y, tower->size.x, tower->size.y};
+  Texture2D texture = towerTextures[tower->type];
+  Rectangle source = {0, 0, texture.width, texture.height};
+  Rectangle dest = {tower->pos.x, tower->pos.y, tower->size.x, tower->size.y};
   Vector2 origin = Vector2Scale(tower->size, 0.5f);
-  DrawRectanglePro(rectangle, origin, 0, tower->color);
+  DrawTexturePro(texture, source, dest, origin, tower->angle, RAYWHITE);
 }
 
 void drawTowers() {
@@ -392,19 +451,11 @@ void computeSpawnBullet(float dt) {
     }
     tower->bulletCooldown -= tower->fireRate;
 
-    for (int j = 0; j < COUNT_OF(enemies); j++) {
-      Enemy *enemy = &enemies[j];
-      if (!enemy->active) {
-        continue;
-      }
-
-      float distance = Vector2Distance(tower->pos, enemy->pos);
-      if (distance < tower->range) {
-        EntityWrapper entityWrapper = {.type = ENTITY_WRAPPER_TYPE_ENEMY, .id = enemy->entityId, .arrayIndex = j};
-        spawnBullet(tower, entityWrapper);
-        break;
-      }
+    EntityWrapper entityWrapper;
+    if (!retrieveTowerTarget(tower, &entityWrapper)) {
+      continue;
     }
+    spawnBullet(tower, entityWrapper);
   }
 }
 
@@ -590,6 +641,25 @@ void updateState() {
   }
 }
 
+void loadAssets() {
+  font = LoadFontEx("assets/fonts/PressStart2P-Regular.ttf", 16, NULL, 0);
+
+  enemyTextures[ENEMY_TYPE_NORMAL] = LoadTexture("assets/sprites/enemy01.png");
+  enemyTextures[ENEMY_TYPE_RUNNER] = LoadTexture("assets/sprites/enemy02.png");
+  enemyTextures[ENEMY_TYPE_TANK] = LoadTexture("assets/sprites/enemy03.png");
+  enemyTextures[ENEMY_TYPE_BOSS] = LoadTexture("assets/sprites/enemy04.png");
+
+  towerTextures[TOWER_TYPE_NORMAL] = LoadTexture("assets/sprites/tower01.png");
+  towerTextures[TOWER_TYPE_DOUBLE] = LoadTexture("assets/sprites/tower02.png");
+}
+
+void unloadAssets() {
+  UnloadFont(font);
+  for (int i = 0; i < COUNT_OF(enemyTextures); i++) {
+    UnloadTexture(enemyTextures[i]);
+  }
+}
+
 int main(void) {
 #ifdef DEBUG_ENABLED
   SetTraceLogLevel(LOG_DEBUG);
@@ -606,7 +676,7 @@ int main(void) {
   SetTargetFPS(60);
   buildPath();
 
-  font = LoadFontEx("assets/fonts/PressStart2P-Regular.ttf", 16, NULL, 0);
+  loadAssets();
 
   while (!WindowShouldClose()) {
     updateState();
@@ -616,15 +686,15 @@ int main(void) {
 
     drawScene();
     drawEnemies();
-    drawTowers();
     drawBullets();
+    drawTowers();
 
     drawHud();
 
     EndDrawing();
   }
 
-  UnloadFont(font);
+  unloadAssets();
 
   CloseWindow();
 
