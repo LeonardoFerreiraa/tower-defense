@@ -35,6 +35,22 @@ GameState gameState = {
 
 Font font;
 
+typedef enum {
+  SCENE_TEXTURE_PATH_TILE,
+  SCENE_TEXTURE_TERRAIN_TILE,
+  SCENE_TEXTURE_EDGE_BOTTOM_TILE,
+  SCENE_TEXTURE_EDGE_TOP_TILE,
+  SCENE_TEXTURE_EDGE_LEFT_TILE,
+  SCENE_TEXTURE_EDGE_RIGHT_TILE,
+  SCENE_TEXTURE_CORNER_BL_TILE,
+  SCENE_TEXTURE_CORNER_BR_TILE,
+  SCENE_TEXTURE_CORNER_TL_TILE,
+  SCENE_TEXTURE_CORNER_TR_TILE,
+  SCENE_TEXTURE_CORNER_COUNT
+} SceneAsset;
+
+Texture2D sceneTextures[SCENE_TEXTURE_CORNER_COUNT];
+
 // ================================================== ENTITY_WRAPPER ==================================================
 
 typedef enum { ENTITY_WRAPPER_TYPE_TOWER, ENTITY_WRAPPER_TYPE_ENEMY, ENTITY_WRAPPER_TYPE_BULLET } EntityWrapperType;
@@ -99,7 +115,7 @@ typedef struct {
 Tower towers[64];
 
 Texture2D towerTextures[TOWER_TYPE_COUNT];
- 
+
 // ================================================== BULLET ==================================================
 
 typedef struct {
@@ -532,12 +548,48 @@ void drawDebugGrid() {
   }
 }
 
-void drawScene() {
-  for (int i = 0; i < pathCount - 1; i++) {
-    Vector2 startPos = path[i];
-    Vector2 endPos = path[i + 1];
+void drawOnTile(int row, int col, int textureIndex) {
+  Texture2D texture = sceneTextures[textureIndex];
+  Rectangle source = {0, 0, texture.width, texture.height};
+  Vector2 pos = cellCenter(col, row);
+  Rectangle dest = {pos.x, pos.y, TILE, TILE};
+  Vector2 origin = Vector2Scale((Vector2){TILE, TILE}, 0.5f);
+  DrawTexturePro(texture, source, dest, origin, 0, RAYWHITE);
+}
 
-    DrawLineV(startPos, endPos, RED);
+void drawScene() {
+  for (int row = 0; row < GRID_ROWS; row++) {
+    for (int col = 0; col < GRID_COLS; col++) {
+      if (pathMatrix[row][col]) {
+        drawOnTile(row, col, SCENE_TEXTURE_PATH_TILE);
+
+        if (col - 1 >= 0 && col + 1 < GRID_COLS && pathMatrix[row][col - 1] && pathMatrix[row][col + 1]) {
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
+        } else if (row - 1 >= 0 && row + 1 < GRID_ROWS && pathMatrix[row - 1][col] && pathMatrix[row + 1][col]) {
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
+        } else if (col - 1 >= 0 && row - 1 >= 0 && pathMatrix[row][col - 1] && pathMatrix[row - 1][col]) {
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_CORNER_BR_TILE);
+        } else if (col + 1 < GRID_COLS && row - 1 >= 0 && pathMatrix[row][col + 1] && pathMatrix[row - 1][col]) {
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_CORNER_BL_TILE);
+        } else if (col + 1 < GRID_COLS && row + 1 < GRID_ROWS && pathMatrix[row][col + 1] && pathMatrix[row + 1][col]) {
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_CORNER_TL_TILE);
+        } else if (col - 1 >= 0 && row + 1 < GRID_ROWS && pathMatrix[row][col - 1] && pathMatrix[row + 1][col]) {
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
+          drawOnTile(row, col, SCENE_TEXTURE_CORNER_TR_TILE);
+        }
+      } else {
+        drawOnTile(row, col, SCENE_TEXTURE_TERRAIN_TILE);
+      }
+    }
   }
 }
 
@@ -651,6 +703,17 @@ void loadAssets() {
 
   towerTextures[TOWER_TYPE_NORMAL] = LoadTexture("assets/sprites/tower01.png");
   towerTextures[TOWER_TYPE_DOUBLE] = LoadTexture("assets/sprites/tower02.png");
+
+  sceneTextures[SCENE_TEXTURE_PATH_TILE] = LoadTexture("assets/sprites/path_tile.png");
+  sceneTextures[SCENE_TEXTURE_TERRAIN_TILE] = LoadTexture("assets/sprites/grass_tile.png");
+  sceneTextures[SCENE_TEXTURE_EDGE_BOTTOM_TILE] = LoadTexture("assets/sprites/edge_bottom_tile.png");
+  sceneTextures[SCENE_TEXTURE_EDGE_TOP_TILE] = LoadTexture("assets/sprites/edge_top_tile.png");
+  sceneTextures[SCENE_TEXTURE_EDGE_LEFT_TILE] = LoadTexture("assets/sprites/edge_left_tile.png");
+  sceneTextures[SCENE_TEXTURE_EDGE_RIGHT_TILE] = LoadTexture("assets/sprites/edge_right_tile.png");
+  sceneTextures[SCENE_TEXTURE_CORNER_BL_TILE] = LoadTexture("assets/sprites/corner_bl_tile.png");
+  sceneTextures[SCENE_TEXTURE_CORNER_BR_TILE] = LoadTexture("assets/sprites/corner_br_tile.png");
+  sceneTextures[SCENE_TEXTURE_CORNER_TL_TILE] = LoadTexture("assets/sprites/corner_tl_tile.png");
+  sceneTextures[SCENE_TEXTURE_CORNER_TR_TILE] = LoadTexture("assets/sprites/corner_tr_tile.png");
 }
 
 void unloadAssets() {
@@ -672,6 +735,7 @@ int main(void) {
 
   TraceLog(LOG_INFO, "seed: %u", seed);
   SetRandomSeed(seed);
+
   InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
   SetTargetFPS(60);
   buildPath();
