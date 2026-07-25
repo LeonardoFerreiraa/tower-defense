@@ -23,6 +23,7 @@ typedef struct {
   float enemySpawnTimer;
   float nextWaveSpawnTimer;
   bool waitingNextWave;
+  int level;
 } GameState;
 
 GameState gameState = {
@@ -32,24 +33,6 @@ GameState gameState = {
     .nextWaveSpawnTimer = -1,
     .waitingNextWave = false,
 };
-
-Font font;
-
-typedef enum {
-  SCENE_TEXTURE_PATH_TILE,
-  SCENE_TEXTURE_TERRAIN_TILE,
-  SCENE_TEXTURE_EDGE_BOTTOM_TILE,
-  SCENE_TEXTURE_EDGE_TOP_TILE,
-  SCENE_TEXTURE_EDGE_LEFT_TILE,
-  SCENE_TEXTURE_EDGE_RIGHT_TILE,
-  SCENE_TEXTURE_CORNER_BL_TILE,
-  SCENE_TEXTURE_CORNER_BR_TILE,
-  SCENE_TEXTURE_CORNER_TL_TILE,
-  SCENE_TEXTURE_CORNER_TR_TILE,
-  SCENE_TEXTURE_CORNER_COUNT
-} SceneAsset;
-
-Texture2D sceneTextures[SCENE_TEXTURE_CORNER_COUNT];
 
 // ================================================== ENTITY_WRAPPER ==================================================
 
@@ -77,8 +60,6 @@ EnemyStat enemyStats[] = {
     [ENEMY_TYPE_TANK] = {200, 0.5, 20, 10},
     [ENEMY_TYPE_BOSS] = {100, 1, 20, 10},
 };
-
-Texture2D enemyTextures[ENEMY_TYPE_COUNT];
 
 typedef struct {
   bool active;
@@ -114,8 +95,6 @@ typedef struct {
 } Tower;
 Tower towers[64];
 
-Texture2D towerTextures[TOWER_TYPE_COUNT];
-
 // ================================================== BULLET ==================================================
 
 typedef struct {
@@ -129,25 +108,33 @@ typedef struct {
 } Bullet;
 Bullet bullets[128];
 
+// ================================================== ASSETS ==================================================
+
+typedef enum {
+  SCENE_TEXTURE_PATH_TILE,
+  SCENE_TEXTURE_TERRAIN_TILE,
+  SCENE_TEXTURE_EDGE_BOTTOM_TILE,
+  SCENE_TEXTURE_EDGE_TOP_TILE,
+  SCENE_TEXTURE_EDGE_LEFT_TILE,
+  SCENE_TEXTURE_EDGE_RIGHT_TILE,
+  SCENE_TEXTURE_CORNER_BL_TILE,
+  SCENE_TEXTURE_CORNER_BR_TILE,
+  SCENE_TEXTURE_CORNER_TL_TILE,
+  SCENE_TEXTURE_CORNER_TR_TILE,
+  SCENE_TEXTURE_CORNER_COUNT
+} SceneAsset;
+
+Texture2D sceneTextures[SCENE_TEXTURE_CORNER_COUNT];
+Texture2D enemyTextures[ENEMY_TYPE_COUNT];
+Texture2D towerTextures[TOWER_TYPE_COUNT];
+
+Font font;
+
+RenderTexture2D sceneBaked;
+
 // ================================================== PATH ==================================================
 
-int pathMatrix[GRID_ROWS][GRID_COLS] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-    {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-    {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, //
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-};
+int pathMatrix[GRID_ROWS][GRID_COLS];
 Vector2 path[GRID_ROWS * GRID_COLS];
 int pathCount = 0;
 
@@ -228,12 +215,12 @@ unsigned int nextEntityId() {
 
 #define SPAWN(list) spawnEntity((list), COUNT_OF(list), sizeof((list)[0]))
 
-typedef struct {
-  bool active;
-  unsigned int entityId;
-} EntityBase;
-
 void *spawnEntity(void *list, int count, size_t stride) {
+  typedef struct {
+    bool active;
+    unsigned int entityId;
+  } EntityBase;
+
   int slot = nextInactiveSlot(list, count, stride);
   if (slot < 0) {
     return NULL;
@@ -244,6 +231,159 @@ void *spawnEntity(void *list, int count, size_t stride) {
   entity->entityId = nextEntityId();
 
   return entity;
+}
+
+// ================================================== SCENE ==================================================
+
+void buildPathMatrix() {
+  int fixed[GRID_ROWS][GRID_COLS] = {
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+      {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
+      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
+      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
+      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, //
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
+      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  };
+
+  for (int row = 0; row < GRID_ROWS; row++) {
+    for (int col = 0; col < GRID_COLS; col++) {
+      pathMatrix[row][col] = fixed[row][col];
+    }
+  }
+}
+
+void buildPath() {
+  int dCol[] = {0, 0, +1, -1};
+  int dRow[] = {+1, -1, 0, 0};
+
+  int prevCol = -1, prevRow = -1;
+  int col = 0, row = 2;
+
+  path[pathCount++] = cellCenter(col, row);
+
+  do {
+    bool moved = false;
+
+    for (int d = 0; d < 4; d++) {
+      int nCol = col + dCol[d];
+      int nRow = row + dRow[d];
+
+      if (nCol < 0 || nCol >= GRID_COLS) {
+        continue;
+      }
+      if (nRow < 0 || nRow >= GRID_ROWS) {
+        continue;
+      }
+      if (pathMatrix[nRow][nCol] != 1) {
+        continue;
+      }
+      if (nCol == prevCol && nRow == prevRow) {
+        continue;
+      }
+
+      prevCol = col;
+      prevRow = row;
+      col = nCol;
+      row = nRow;
+      path[pathCount++] = cellCenter(col, row);
+      moved = true;
+      break;
+    }
+
+    if (!moved) {
+      break;
+    }
+  } while (pathCount < COUNT_OF(path));
+}
+
+void drawOnTile(int row, int col, int textureIndex) {
+  Texture2D texture = sceneTextures[textureIndex];
+  Rectangle source = {0, 0, texture.width, texture.height};
+  Vector2 pos = cellCenter(col, row);
+  Rectangle dest = {pos.x, pos.y, TILE, TILE};
+  Vector2 origin = (Vector2){TILE * 0.5f, TILE * 0.5f};
+  DrawTexturePro(texture, source, dest, origin, 0, RAYWHITE);
+}
+
+bool isNotRoad(int row, int col) {
+  if (row < 0 || row >= GRID_ROWS || col < 0 || col >= GRID_COLS) {
+    return true;
+  }
+
+  return !pathMatrix[row][col];
+}
+
+void drawScene() {
+  for (int row = 0; row < GRID_ROWS; row++) {
+    for (int col = 0; col < GRID_COLS; col++) {
+      if (isNotRoad(row, col)) {
+        drawOnTile(row, col, SCENE_TEXTURE_TERRAIN_TILE);
+        continue;
+      }
+
+      drawOnTile(row, col, SCENE_TEXTURE_PATH_TILE);
+
+      bool hasNoRoadUp = isNotRoad(row - 1, col);
+      bool hasNoRoadDown = isNotRoad(row + 1, col);
+      bool hasNoRoadLeft = isNotRoad(row, col - 1);
+      bool hasNoRoadRight = isNotRoad(row, col + 1);
+
+      if (hasNoRoadUp) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
+      }
+
+      if (hasNoRoadDown) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
+      }
+      if (hasNoRoadLeft) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
+      }
+      if (hasNoRoadRight) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
+      }
+
+      if (hasNoRoadUp && hasNoRoadLeft) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_TL_TILE);
+      }
+      if (hasNoRoadUp && hasNoRoadRight) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_TR_TILE);
+      }
+      if (hasNoRoadDown && hasNoRoadLeft) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_BL_TILE);
+      }
+      if (hasNoRoadDown && hasNoRoadRight) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_BR_TILE);
+      }
+    }
+  }
+}
+
+void bakeScene() {
+  sceneBaked = LoadRenderTexture(GRID_COLS * TILE, GRID_ROWS * TILE);
+  BeginTextureMode(sceneBaked);
+  ClearBackground(RAYWHITE);
+  drawScene();
+  EndTextureMode();
+}
+
+void drawBakedScene() {
+  DrawTextureRec(sceneBaked.texture, (Rectangle){0, 0, sceneBaked.texture.width, -sceneBaked.texture.height}, (Vector2){0, 0}, RAYWHITE);
+}
+
+void nextLevel() {
+  gameState.level++;
+  buildPathMatrix();
+  buildPath();
+  bakeScene();
 }
 
 // ================================================== WAVE ==================================================
@@ -556,68 +696,6 @@ void drawDebugGrid() {
   }
 }
 
-void drawOnTile(int row, int col, int textureIndex) {
-  Texture2D texture = sceneTextures[textureIndex];
-  Rectangle source = {0, 0, texture.width, texture.height};
-  Vector2 pos = cellCenter(col, row);
-  Rectangle dest = {pos.x, pos.y, TILE, TILE};
-  Vector2 origin = (Vector2){TILE * 0.5f, TILE * 0.5f};
-  DrawTexturePro(texture, source, dest, origin, 0, RAYWHITE);
-}
-
-bool isNotRoad(int row, int col) {
-  if (row < 0 || row >= GRID_ROWS || col < 0 || col >= GRID_COLS) {
-    return true;
-  }
-
-  return !pathMatrix[row][col];
-}
-
-void drawScene() {
-  for (int row = 0; row < GRID_ROWS; row++) {
-    for (int col = 0; col < GRID_COLS; col++) {
-      if (isNotRoad(row, col)) {
-        drawOnTile(row, col, SCENE_TEXTURE_TERRAIN_TILE);
-        continue;
-      }
-
-      drawOnTile(row, col, SCENE_TEXTURE_PATH_TILE);
-
-      bool hasNoRoadUp = isNotRoad(row - 1, col);
-      bool hasNoRoadDown = isNotRoad(row + 1, col);
-      bool hasNoRoadLeft = isNotRoad(row, col - 1);
-      bool hasNoRoadRight = isNotRoad(row, col + 1);
-
-      if (hasNoRoadUp) {
-        drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
-      }
-
-      if (hasNoRoadDown) {
-        drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
-      }
-      if (hasNoRoadLeft) {
-        drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
-      }
-      if (hasNoRoadRight) {
-        drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
-      }
-
-      if (hasNoRoadUp && hasNoRoadLeft) {
-        drawOnTile(row, col, SCENE_TEXTURE_CORNER_TL_TILE);
-      }
-      if (hasNoRoadUp && hasNoRoadRight) {
-        drawOnTile(row, col, SCENE_TEXTURE_CORNER_TR_TILE);
-      }
-      if (hasNoRoadDown && hasNoRoadLeft) {
-        drawOnTile(row, col, SCENE_TEXTURE_CORNER_BL_TILE);
-      }
-      if (hasNoRoadDown && hasNoRoadRight) {
-        drawOnTile(row, col, SCENE_TEXTURE_CORNER_BR_TILE);
-      }
-    }
-  }
-}
-
 float drawStat(float x, const char *fmt, ...) {
   char buf[64];
   va_list args;
@@ -657,66 +735,7 @@ void drawHud() {
 
 // ================================================== PATH ==================================================
 
-void buildPath() {
-  int dCol[] = {0, 0, +1, -1};
-  int dRow[] = {+1, -1, 0, 0};
-
-  int prevCol = -1, prevRow = -1;
-  int col = 0, row = 2;
-
-  path[pathCount++] = cellCenter(col, row);
-
-  do {
-    bool moved = false;
-
-    for (int d = 0; d < 4; d++) {
-      int nCol = col + dCol[d];
-      int nRow = row + dRow[d];
-
-      if (nCol < 0 || nCol >= GRID_COLS) {
-        continue;
-      }
-      if (nRow < 0 || nRow >= GRID_ROWS) {
-        continue;
-      }
-      if (pathMatrix[nRow][nCol] != 1) {
-        continue;
-      }
-      if (nCol == prevCol && nRow == prevRow) {
-        continue;
-      }
-
-      prevCol = col;
-      prevRow = row;
-      col = nCol;
-      row = nRow;
-      path[pathCount++] = cellCenter(col, row);
-      moved = true;
-      break;
-    }
-
-    if (!moved) {
-      break;
-    }
-  } while (pathCount < COUNT_OF(path));
-}
-
-// ================================================== MAIN ==================================================
-
-void updateState() {
-  float dt = GetFrameTime();
-
-  computeSpawnEnemy(dt);
-  computeSpawnWave(dt);
-  computeBullet(dt);
-
-  computeEnemiesMovement(dt);
-  updateTowerState();
-
-  if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
-    gameState.nextWaveSpawnTimer = 0;
-  }
-}
+// ================================================== ASSETS ==================================================
 
 void loadAssets() {
   font = LoadFontEx("assets/fonts/PressStart2P-Regular.ttf", 16, NULL, 0);
@@ -743,6 +762,8 @@ void loadAssets() {
 
 void unloadAssets() {
   UnloadFont(font);
+  UnloadRenderTexture(sceneBaked);
+
   for (int i = 0; i < COUNT_OF(enemyTextures); i++) {
     UnloadTexture(enemyTextures[i]);
   }
@@ -751,6 +772,23 @@ void unloadAssets() {
   }
   for (int i = 0; i < COUNT_OF(sceneTextures); i++) {
     UnloadTexture(sceneTextures[i]);
+  }
+}
+
+// ================================================== MAIN ==================================================
+
+void updateState() {
+  float dt = GetFrameTime();
+
+  computeSpawnEnemy(dt);
+  computeSpawnWave(dt);
+  computeBullet(dt);
+
+  computeEnemiesMovement(dt);
+  updateTowerState();
+
+  if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
+    gameState.nextWaveSpawnTimer = 0;
   }
 }
 
@@ -769,17 +807,20 @@ int main(void) {
 
   InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
   SetTargetFPS(60);
-  buildPath();
 
   loadAssets();
 
   while (!WindowShouldClose()) {
+    if (gameState.level == 0) {
+      nextLevel();
+    }
+
     updateState();
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
-    drawScene();
+    drawBakedScene();
     drawEnemies();
     drawBullets();
     drawTowers();
