@@ -305,13 +305,7 @@ void computeSpawnEnemy(float dt) {
 void computeEnemiesMovement(float dt) {
   for (int i = 0; i < COUNT_OF(enemies); i++) {
     Enemy *enemy = &enemies[i];
-    if (enemy->active == false) {
-      continue;
-    }
-
-    if (enemy->targetIndex == pathCount) {
-      enemy->active = false;
-      player.lifePoints -= enemyStats[enemy->type].damage;
+    if (!enemy->active) {
       continue;
     }
 
@@ -319,6 +313,12 @@ void computeEnemiesMovement(float dt) {
     enemy->pos = Vector2MoveTowards(enemy->pos, target, (gameState.speed * enemyStats[enemy->type].speedMultiplier) * dt);
     if (Vector2Equals(enemy->pos, target)) {
       enemy->targetIndex++;
+    }
+
+    if (enemy->targetIndex == pathCount) {
+      enemy->active = false;
+      player.lifePoints -= enemyStats[enemy->type].damage;
+      continue;
     }
 
     Vector2 newTarget = path[enemy->targetIndex];
@@ -369,7 +369,15 @@ void spawnTower(Vector2 pos) {
   int posX = pos.x / TILE;
   int posY = pos.y / TILE;
 
-  if (posY <= 1 || posY >= GRID_ROWS - 1 || pathMatrix[posY][posX]) {
+  if (posX < 0 || posX >= GRID_COLS) {
+    return;
+  }
+
+  if (posY <= 1 || posY >= GRID_ROWS - 1) {
+    return;
+  }
+
+  if (pathMatrix[posY][posX]) {
     return;
   }
 
@@ -553,41 +561,58 @@ void drawOnTile(int row, int col, int textureIndex) {
   Rectangle source = {0, 0, texture.width, texture.height};
   Vector2 pos = cellCenter(col, row);
   Rectangle dest = {pos.x, pos.y, TILE, TILE};
-  Vector2 origin = Vector2Scale((Vector2){TILE, TILE}, 0.5f);
+  Vector2 origin = (Vector2){TILE * 0.5f, TILE * 0.5f};
   DrawTexturePro(texture, source, dest, origin, 0, RAYWHITE);
+}
+
+bool isNotRoad(int row, int col) {
+  if (row < 0 || row >= GRID_ROWS || col < 0 || col >= GRID_COLS) {
+    return true;
+  }
+
+  return !pathMatrix[row][col];
 }
 
 void drawScene() {
   for (int row = 0; row < GRID_ROWS; row++) {
     for (int col = 0; col < GRID_COLS; col++) {
-      if (pathMatrix[row][col]) {
-        drawOnTile(row, col, SCENE_TEXTURE_PATH_TILE);
-
-        if (col - 1 >= 0 && col + 1 < GRID_COLS && pathMatrix[row][col - 1] && pathMatrix[row][col + 1]) {
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
-        } else if (row - 1 >= 0 && row + 1 < GRID_ROWS && pathMatrix[row - 1][col] && pathMatrix[row + 1][col]) {
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
-        } else if (col - 1 >= 0 && row - 1 >= 0 && pathMatrix[row][col - 1] && pathMatrix[row - 1][col]) {
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_CORNER_BR_TILE);
-        } else if (col + 1 < GRID_COLS && row - 1 >= 0 && pathMatrix[row][col + 1] && pathMatrix[row - 1][col]) {
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_CORNER_BL_TILE);
-        } else if (col + 1 < GRID_COLS && row + 1 < GRID_ROWS && pathMatrix[row][col + 1] && pathMatrix[row + 1][col]) {
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_CORNER_TL_TILE);
-        } else if (col - 1 >= 0 && row + 1 < GRID_ROWS && pathMatrix[row][col - 1] && pathMatrix[row + 1][col]) {
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
-          drawOnTile(row, col, SCENE_TEXTURE_CORNER_TR_TILE);
-        }
-      } else {
+      if (isNotRoad(row, col)) {
         drawOnTile(row, col, SCENE_TEXTURE_TERRAIN_TILE);
+        continue;
+      }
+
+      drawOnTile(row, col, SCENE_TEXTURE_PATH_TILE);
+
+      bool hasNoRoadUp = isNotRoad(row - 1, col);
+      bool hasNoRoadDown = isNotRoad(row + 1, col);
+      bool hasNoRoadLeft = isNotRoad(row, col - 1);
+      bool hasNoRoadRight = isNotRoad(row, col + 1);
+
+      if (hasNoRoadUp) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_TOP_TILE);
+      }
+
+      if (hasNoRoadDown) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_BOTTOM_TILE);
+      }
+      if (hasNoRoadLeft) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_LEFT_TILE);
+      }
+      if (hasNoRoadRight) {
+        drawOnTile(row, col, SCENE_TEXTURE_EDGE_RIGHT_TILE);
+      }
+
+      if (hasNoRoadUp && hasNoRoadLeft) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_TL_TILE);
+      }
+      if (hasNoRoadUp && hasNoRoadRight) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_TR_TILE);
+      }
+      if (hasNoRoadDown && hasNoRoadLeft) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_BL_TILE);
+      }
+      if (hasNoRoadDown && hasNoRoadRight) {
+        drawOnTile(row, col, SCENE_TEXTURE_CORNER_BR_TILE);
       }
     }
   }
@@ -720,6 +745,12 @@ void unloadAssets() {
   UnloadFont(font);
   for (int i = 0; i < COUNT_OF(enemyTextures); i++) {
     UnloadTexture(enemyTextures[i]);
+  }
+  for (int i = 0; i < COUNT_OF(towerTextures); i++) {
+    UnloadTexture(towerTextures[i]);
+  }
+  for (int i = 0; i < COUNT_OF(sceneTextures); i++) {
+    UnloadTexture(sceneTextures[i]);
   }
 }
 
