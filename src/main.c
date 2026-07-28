@@ -8,25 +8,34 @@
 #define TILE 80
 #define GRID_COLS 20
 #define GRID_ROWS 15
+#define TILE_AS_VECTOR2                                                                                                                                        \
+  (Vector2) {                                                                                                                                                  \
+    TILE, TILE                                                                                                                                                 \
+  }
 
 #define ENEMY_SPAWN_DELAY_IN_SECONDS 1
 #define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
 #define ENEMY_PER_WAVE 5
+#define NOTIFICATION_DURATION 5
 
+#define MYBROWN (Color){129, 89, 46, 255}
+
+#define BUTTON_LABEL_BUY "Buy"
+
+#define FLOATING_MENU_ITEMS_PADDING 10
 #define COUNT_OF(a) (int)(sizeof(a) / sizeof((a)[0]))
+#define MATH_MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // ================================================== SHARED STATE ==================================================
 
-typedef struct {
+struct {
   float speed;
   int wave;
   float enemySpawnTimer;
   float nextWaveSpawnTimer;
   bool waitingNextWave;
   int level;
-} GameState;
-
-GameState gameState = {
+} gameState = {
     .speed = 200.0f,
     .wave = 1,
     .enemySpawnTimer = 0,
@@ -36,7 +45,11 @@ GameState gameState = {
 
 // ================================================== ENTITY_WRAPPER ==================================================
 
-typedef enum { ENTITY_WRAPPER_TYPE_TOWER, ENTITY_WRAPPER_TYPE_ENEMY, ENTITY_WRAPPER_TYPE_BULLET } EntityWrapperType;
+typedef enum {
+  ENTITY_WRAPPER_TYPE_TOWER,
+  ENTITY_WRAPPER_TYPE_ENEMY,
+  ENTITY_WRAPPER_TYPE_BULLET,
+} EntityWrapperType;
 
 typedef struct {
   EntityWrapperType type;
@@ -46,7 +59,14 @@ typedef struct {
 
 // ================================================== ENEMY ==================================================
 
-typedef enum { ENEMY_TYPE_NORMAL, ENEMY_TYPE_RUNNER, ENEMY_TYPE_TANK, ENEMY_TYPE_BOSS, ENEMY_TYPE_COUNT } EnemyType;
+typedef enum {
+  ENEMY_TYPE_NORMAL,
+  ENEMY_TYPE_RUNNER,
+  ENEMY_TYPE_TANK,
+  ENEMY_TYPE_BOSS,
+  ENEMY_TYPE_COUNT,
+} EnemyType;
+
 typedef struct {
   int healthPoints;
   float speedMultiplier;
@@ -79,21 +99,40 @@ int enemyCount = 0;
 
 // ================================================== TOWER ==================================================
 
-typedef enum { TOWER_TYPE_NORMAL, TOWER_TYPE_DOUBLE, TOWER_TYPE_COUNT } TowerType;
+typedef enum {
+  TOWER_TYPE_NORMAL,
+  TOWER_TYPE_DOUBLE,
+  TOWER_TYPE_COUNT,
+} TowerType;
+
 typedef struct {
   bool active;
   unsigned int entityId;
 
   Vector2 pos;
   Vector2 size;
-  Color color;
-  float range;
-  float fireRate;
-  float bulletCooldown;
   TowerType type;
+
+  float range;
+  int fireRate;
+  float damage;
+
+  float bulletCooldown;
   float angle;
 } Tower;
 Tower towers[64];
+
+typedef struct {
+  int cost;
+  float range;
+  int fireRate;
+  float damage;
+} TowerStat;
+
+TowerStat towerStats[] = {
+    [TOWER_TYPE_NORMAL] = {100, TILE * 2.5f, 2, 20},
+    [TOWER_TYPE_DOUBLE] = {200, TILE * 2.5f, 4, 15},
+};
 
 // ================================================== BULLET ==================================================
 
@@ -140,15 +179,109 @@ int pathCount = 0;
 
 // ================================================== PLAYER ==================================================
 
-typedef struct {
+struct {
   int lifePoints;
   int gold;
-} Player;
-
-Player player = {
-    .lifePoints = 1000, //
-    .gold = 1000        //
+} player = {
+    .lifePoints = 1000,
+    .gold = 300,
 };
+
+// ================================================== FLOATING MENU ==================================================
+
+typedef enum {
+  FLOATING_MENU_TYPE_SHOPPING,
+  FLOATING_MENU_TYPE_PAUSE,
+  FLOATING_MENU_TYPE_GAMEOVER,
+  FLOATING_MENU_TYPE_NONE,
+} FloatingMenuType;
+
+FloatingMenuType currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
+
+typedef enum {
+  FLOATING_MENU_ASSET_BASE,
+  FLOATING_MENU_ASSET_HEADER_LEFT,
+  FLOATING_MENU_ASSET_HEADER_CENTER,
+  FLOATING_MENU_ASSET_HEADER_RIGHT,
+  FLOATING_MENU_ASSET_BUTTON_DEFAULT,
+  FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER,
+  FLOATING_MENU_ASSET_COUNT,
+} FloatingMenuAsset;
+Texture2D floatingMenuAssets[FLOATING_MENU_ASSET_COUNT];
+
+// ================================================== COMMANDS ==================================================
+
+typedef enum {
+  COMMAND_TYPE_BUY_TOWER,
+  COMMAND_TYPE_PLACE_TOWER,
+} CommandType;
+
+typedef struct {
+  union {
+    struct {
+      TowerType towerType;
+    } buyTower;
+    struct {
+      TowerType towerType;
+      Vector2 pos;
+    } placeTower;
+  };
+} CommandCtx;
+
+typedef struct {
+  bool active;
+  unsigned int entityId;
+
+  CommandType type;
+  CommandCtx ctx;
+  void (*computeCommand)(CommandCtx ctx);
+} Command;
+
+Command commands[32];
+
+// ================================================== PLACEMENT ==================================================
+
+typedef enum {
+  PLACEMENT_CTX_TYPE_TOWER,
+} PlacementCtxType;
+
+typedef struct {
+  PlacementCtxType type;
+
+  union {
+    struct {
+      TowerType towerType;
+    } tower;
+  };
+} PlacementCtx;
+
+struct {
+  bool active;
+  PlacementCtx ctx;
+
+  bool (*validatePlacement)(PlacementCtx ctx, Vector2 pos);
+  void (*confirmPlacement)(PlacementCtx ctx, Vector2 pos);
+  void (*drawPlacementGhost)(PlacementCtx ctx, Vector2 pos, bool canBePlaced);
+} placement = {0};
+
+// ================================================== NOTIFICATION ==================================================
+
+typedef enum {
+  NOTIFICATION_TYPE_SUCCESS,
+  NOTIFICATION_TYPE_FAILURE,
+} NotificationType;
+
+typedef struct {
+  bool active;
+  unsigned int entityId;
+
+  NotificationType type;
+  char *message;
+
+  float duration;
+} Notification;
+
+Notification notifications[32];
 
 // ================================================== UTILITY ==================================================
 
@@ -213,9 +346,9 @@ unsigned int nextEntityId() {
   return ++seq;
 }
 
-#define SPAWN(list) spawnEntity((list), COUNT_OF(list), sizeof((list)[0]))
+#define NEW_ENTITY(list) newEntity((list), COUNT_OF(list), sizeof((list)[0]))
 
-void *spawnEntity(void *list, int count, size_t stride) {
+void *newEntity(void *list, int count, size_t stride) {
   typedef struct {
     bool active;
     unsigned int entityId;
@@ -231,6 +364,75 @@ void *spawnEntity(void *list, int count, size_t stride) {
   entity->entityId = nextEntityId();
 
   return entity;
+}
+
+// ================================================== COMMANDS ==================================================
+
+void pushCommand(CommandType type, void (*computeCommand)(CommandCtx ctx), CommandCtx ctx) {
+  Command *command = NEW_ENTITY(commands);
+  if (command == NULL) {
+    TraceLog(LOG_ERROR, "failed to spawn command");
+    return;
+  }
+
+  command->type = type;
+  command->computeCommand = computeCommand;
+  command->ctx = ctx;
+}
+
+void computeCommands() {
+  for (int i = 0; i < COUNT_OF(commands); i++) {
+    Command *command = &commands[i];
+    if (!command->active) {
+      continue;
+    }
+
+    command->computeCommand(command->ctx);
+    command->active = false;
+  }
+}
+
+// ================================================== NOTIFICATION ==================================================
+
+void pushNotification(NotificationType type, char *message) {
+  Notification *notification = NEW_ENTITY(notifications);
+  if (notification == NULL) {
+    TraceLog(LOG_ERROR, "failed to spawn notification (%d)", type);
+    return;
+  }
+
+  notification->type = type;
+  notification->message = message;
+  notification->duration = NOTIFICATION_DURATION;
+}
+
+void computeNotificationDuration(float dt) {
+  for (int i = 0; i < COUNT_OF(notifications); i++) {
+    Notification *notification = &notifications[i];
+    if (!notification->active) {
+      continue;
+    }
+
+    notification->duration -= dt;
+    if (notification->duration <= 0) {
+      notification->active = false;
+    }
+  }
+}
+
+void drawNotification(Notification *notification) {
+  // TODO improve
+  DrawRectangle(100, 100, 100, 50, RED);
+}
+
+void drawNotifications() {
+  for (int i = 0; i < COUNT_OF(notifications); i++) {
+    Notification *notification = &notifications[i];
+    if (!notification->active) {
+      continue;
+    }
+    drawNotification(notification);
+  }
 }
 
 // ================================================== SCENE ==================================================
@@ -310,7 +512,7 @@ void drawOnTile(int row, int col, int textureIndex) {
   Rectangle source = {0, 0, texture.width, texture.height};
   Vector2 pos = cellCenter(col, row);
   Rectangle dest = {pos.x, pos.y, TILE, TILE};
-  Vector2 origin = (Vector2){TILE * 0.5f, TILE * 0.5f};
+  Vector2 origin = Vector2Scale(TILE_AS_VECTOR2, 0.5f);
   DrawTexturePro(texture, source, dest, origin, 0, RAYWHITE);
 }
 
@@ -410,6 +612,12 @@ void computeSpawnWave(float dt) {
   }
 }
 
+void computeWaveState() {
+  if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
+    gameState.nextWaveSpawnTimer = 0;
+  }
+}
+
 // ================================================== ENEMY ==================================================
 
 void spawnEnemy() {
@@ -417,14 +625,14 @@ void spawnEnemy() {
     return;
   }
 
-  Enemy *enemy = SPAWN(enemies);
+  Enemy *enemy = NEW_ENTITY(enemies);
   if (enemy == NULL) {
     return;
   }
 
   enemy->type = GetRandomValue(0, ENEMY_TYPE_COUNT - 2);
   enemy->pos = path[0];
-  enemy->size = (Vector2){65, 65};
+  enemy->size = Vector2Scale(TILE_AS_VECTOR2, 0.8f);
   enemy->color = RED;
   enemy->targetIndex = 1;
   enemy->lifePoints = enemyStats[enemy->type].healthPoints;
@@ -505,41 +713,25 @@ bool retrieveTowerTarget(Tower *tower, EntityWrapper *out) {
   return false;
 }
 
-void spawnTower(Vector2 pos) {
-  int posX = pos.x / TILE;
-  int posY = pos.y / TILE;
-
-  if (posX < 0 || posX >= GRID_COLS) {
-    return;
-  }
-
-  if (posY <= 1 || posY >= GRID_ROWS - 1) {
-    return;
-  }
-
-  if (pathMatrix[posY][posX]) {
-    return;
-  }
-
-  if (player.gold < 100) {
-    return;
-  }
-  player.gold -= 100;
-
-  Tower *tower = SPAWN(towers);
+void spawnTower(TowerType towerType, Vector2 pos) {
+  Tower *tower = NEW_ENTITY(towers);
   if (tower == NULL) {
+    TraceLog(LOG_ERROR, "failed to spawn tower");
     return;
   }
 
-  tower->pos = cellCenter(posX, posY);
-  tower->size = (Vector2){65, 65};
-  tower->color = BLUE;
-  tower->range = TILE / 2.0f + TILE * 2;
-  tower->fireRate = 1.0f / 2;
-  tower->bulletCooldown = tower->fireRate;
-  tower->type = TOWER_TYPE_NORMAL;
+  tower->pos = pos;
+  tower->size = Vector2Scale(TILE_AS_VECTOR2, 0.8f);
+  tower->type = towerType;
 
-  TraceLog(LOG_DEBUG, "tower spawned (%f %f)", tower->pos.x, tower->pos.y);
+  tower->range = towerStats[towerType].range;
+  tower->fireRate = towerStats[towerType].fireRate;
+  tower->damage = towerStats[towerType].damage;
+
+  tower->bulletCooldown = 1.0f / tower->fireRate;
+  tower->angle = 0;
+
+  TraceLog(LOG_DEBUG, "tower (%d) spawned (%f %f)", towerType, tower->pos.x, tower->pos.y);
 }
 
 void computeTowerAngle() {
@@ -565,9 +757,6 @@ void computeTowerAngle() {
 }
 
 void updateTowerState() {
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-    spawnTower(GetMousePosition());
-  }
   computeTowerAngle();
 }
 
@@ -588,10 +777,103 @@ void drawTowers() {
   }
 }
 
+bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
+  if (ctx.type != PLACEMENT_CTX_TYPE_TOWER) {
+    TraceLog(LOG_ERROR, "invalid type");
+    return false;
+  }
+
+  int posX = pos.x / TILE;
+  int posY = pos.y / TILE;
+
+  if (posX < 0 || posX >= GRID_COLS) {
+    return false;
+  }
+
+  if (posY <= 1 || posY >= GRID_ROWS - 1) {
+    return false;
+  }
+
+  if (pathMatrix[posY][posX]) {
+    return false;
+  }
+
+  for (int i = 0; i < COUNT_OF(towers); i++) {
+    Tower tower = towers[i];
+    if (!tower.active) {
+      continue;
+    }
+
+    int towerPosX = tower.pos.x / TILE;
+    int towerPosY = tower.pos.y / TILE;
+    if (towerPosX == posX && towerPosY == posY) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void drawTowerPlacementGhost(PlacementCtx ctx, Vector2 pos, bool canBePlaced) {
+  if (ctx.type != PLACEMENT_CTX_TYPE_TOWER) {
+    TraceLog(LOG_ERROR, "invalid type");
+    return;
+  }
+
+  int posX = ((int)(pos.x / TILE)) * TILE + TILE / 2.0f;
+  int posY = ((int)(pos.y / TILE)) * TILE + TILE / 2.0f;
+
+  Texture2D texture = towerTextures[ctx.tower.towerType];
+  Rectangle source = {0, 0, texture.width, texture.height};
+  Rectangle dest = {posX, posY, TILE, TILE};
+  Vector2 origin = Vector2Scale(TILE_AS_VECTOR2, 0.5f);
+  Color color = canBePlaced ? Fade(GREEN, 0.7f) : Fade(RED, 0.7f);
+  DrawTexturePro(texture, source, dest, origin, 0, color);
+}
+
+void computePlaceTowerCommand(CommandCtx ctx) {
+  TowerType towerType = ctx.placeTower.towerType;
+  Vector2 pos = ctx.placeTower.pos;
+
+  TowerStat stat = towerStats[towerType];
+  player.gold -= stat.cost;
+
+  spawnTower(towerType, cellCenter(pos.x / TILE, pos.y / TILE));
+}
+
+void confirmTowerPlacement(PlacementCtx ctx, Vector2 pos) {
+  if (ctx.type != PLACEMENT_CTX_TYPE_TOWER) {
+    TraceLog(LOG_ERROR, "invalid type");
+    return;
+  }
+
+  // TODO validar gold novamente?
+
+  CommandCtx commandCtx = (CommandCtx){.placeTower = {.towerType = ctx.tower.towerType, .pos = pos}};
+  pushCommand(COMMAND_TYPE_PLACE_TOWER, computePlaceTowerCommand, commandCtx);
+}
+
+void computeBuyTowerCommand(CommandCtx ctx) {
+  TowerType towerType = ctx.buyTower.towerType;
+  currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
+
+  TowerStat towerStat = towerStats[towerType];
+  if (player.gold < towerStat.cost) {
+    pushNotification(NOTIFICATION_TYPE_FAILURE, "Insufficient Gold");
+    return;
+  }
+
+  placement.active = true;
+  placement.ctx = (PlacementCtx){.tower = {.towerType = towerType}};
+  placement.validatePlacement = validateTowerPlacement;
+  placement.confirmPlacement = confirmTowerPlacement;
+  placement.drawPlacementGhost = drawTowerPlacementGhost;
+}
+
 // ================================================== BULLET ==================================================
 
 void spawnBullet(Tower *tower, EntityWrapper target) {
-  Bullet *bullet = SPAWN(bullets);
+  Bullet *bullet = NEW_ENTITY(bullets);
   if (bullet == NULL) {
     return;
   }
@@ -610,10 +892,11 @@ void computeSpawnBullet(float dt) {
     }
 
     tower->bulletCooldown += dt;
-    if (tower->bulletCooldown < tower->fireRate) {
+    float fireInterval = 1.0f / tower->fireRate;
+    if (tower->bulletCooldown < fireInterval) {
       continue;
     }
-    tower->bulletCooldown -= tower->fireRate;
+    tower->bulletCooldown -= fireInterval;
 
     EntityWrapper entityWrapper;
     if (!retrieveTowerTarget(tower, &entityWrapper)) {
@@ -710,7 +993,7 @@ float drawStat(float x, const char *fmt, ...) {
 
 void drawHud() {
   int maxWidth = GetScreenWidth();
-  DrawRectangle(0, 0, maxWidth, TILE, BROWN);
+  DrawRectangle(0, 0, maxWidth, TILE, MYBROWN);
 
   float x = 10;
   x = drawStat(x, "Life: %d", player.lifePoints);
@@ -726,14 +1009,175 @@ void drawHud() {
   }
 
   int maxHeight = GetScreenHeight();
-  DrawRectangle(0, maxHeight - TILE, maxWidth, TILE, BROWN);
+  DrawRectangle(0, maxHeight - TILE, maxWidth, TILE, MYBROWN);
 
 #ifdef DEBUG_ENABLED
   drawDebugGrid();
 #endif
 }
 
-// ================================================== PATH ==================================================
+// ================================================== FLOATING MENU ==================================================
+
+void computeFloatingMenuKeys() {
+  if (IsKeyPressed(KEY_TAB) && currentFloatingMenuOpen == FLOATING_MENU_TYPE_NONE) {
+    TraceLog(LOG_DEBUG, "tab pressed");
+    placement.active = false;
+    currentFloatingMenuOpen = FLOATING_MENU_TYPE_SHOPPING;
+    return;
+  }
+
+  if (IsKeyPressed(KEY_ESCAPE) && currentFloatingMenuOpen == FLOATING_MENU_TYPE_NONE && !placement.active) {
+    TraceLog(LOG_DEBUG, "esc pressed to pause");
+    placement.active = false;
+    currentFloatingMenuOpen = FLOATING_MENU_TYPE_PAUSE;
+    return;
+  }
+
+  if (IsKeyPressed(KEY_ESCAPE)) {
+    TraceLog(LOG_DEBUG, "esc pressed to close opened floating menu");
+    placement.active = false;
+    currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
+    return;
+  }
+}
+
+void drawFloatingMenuHeaderStrip(Vector2 floatingTileSize, Rectangle baseDest) {
+  Vector2 origin = Vector2Scale(floatingTileSize, 0.5f);
+  Rectangle source = {0, 0, floatingTileSize.x, floatingTileSize.y};
+
+  Rectangle leftDest = {baseDest.x + 1.5 * TILE, baseDest.y, floatingTileSize.x, floatingTileSize.y};
+  DrawTexturePro(floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_LEFT], source, leftDest, origin, 0, RAYWHITE);
+
+  Rectangle rightDest = {baseDest.x + baseDest.width - 1.5 * TILE, baseDest.y, floatingTileSize.x, floatingTileSize.y};
+  DrawTexturePro(floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_RIGHT], source, rightDest, origin, 0, RAYWHITE);
+
+  float cur = leftDest.x + leftDest.width;
+  while (cur < rightDest.x) {
+    Rectangle dest = {cur, baseDest.y, MATH_MIN(floatingTileSize.x, rightDest.x - cur), floatingTileSize.y};
+    DrawTexturePro(floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_CENTER], source, dest, origin, 0, RAYWHITE);
+
+    cur += floatingTileSize.x;
+  };
+}
+
+Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
+  if (sizeInTiles.x < 5 || sizeInTiles.x > GRID_COLS || sizeInTiles.y < 0 || sizeInTiles.y > GRID_ROWS) {
+    TraceLog(LOG_ERROR, "invalid size");
+    return (Vector2){0, 0};
+  }
+
+  int fontSize = 16;
+
+  Vector2 floatingTileSize = {floatingMenuAssets[FLOATING_MENU_ASSET_BASE].width, floatingMenuAssets[FLOATING_MENU_ASSET_BASE].height};
+
+  NPatchInfo nPatchInfo = {.source = {0, 0, floatingTileSize.x, floatingTileSize.y},
+                           .left = floatingTileSize.x / 2,
+                           .right = floatingTileSize.x / 2,
+                           .top = floatingTileSize.y / 2,
+                           .bottom = floatingTileSize.y / 2,
+                           .layout = NPATCH_NINE_PATCH};
+
+  Rectangle baseDest = {.x = (GRID_COLS - sizeInTiles.x) / 2 * TILE, //
+                        .y = (GRID_ROWS - sizeInTiles.y) / 2 * TILE, //
+                        .width = TILE * sizeInTiles.x,               //
+                        .height = TILE * sizeInTiles.y};
+
+  DrawTextureNPatch(floatingMenuAssets[FLOATING_MENU_ASSET_BASE], nPatchInfo, baseDest, (Vector2){0, 0}, 0, WHITE);
+
+  drawFloatingMenuHeaderStrip(floatingTileSize, baseDest);
+
+  Vector2 textSize = MeasureTextEx(font, headerText, fontSize, 1);
+  DrawTextEx(font, headerText, (Vector2){baseDest.x + baseDest.width / 2 - textSize.x / 2, baseDest.y - textSize.y / 2}, fontSize, 1, RAYWHITE);
+
+  return (Vector2){baseDest.x + TILE, baseDest.y + TILE * 0.75};
+}
+
+void drawPauseFloatingMenu() {
+  Vector2 size = {6, 3};
+  drawRawFloatingMenu(size, "PAUSE");
+  // TODO: improve
+}
+
+Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
+  Texture2D texture = towerTextures[towerType];
+
+  Rectangle rectangleWrapper = (Rectangle){drawAt.x, drawAt.y, (size.x - 2) * TILE, texture.height};
+
+  Vector2 buttonSize = {100, 50};
+  Rectangle buttonRectangle = {.x = rectangleWrapper.x + rectangleWrapper.width - buttonSize.x - FLOATING_MENU_ITEMS_PADDING, //
+                               .y = rectangleWrapper.y + rectangleWrapper.height - buttonSize.y - FLOATING_MENU_ITEMS_PADDING,
+                               .width = buttonSize.x,
+                               .height = buttonSize.y};
+  bool mouseOverButton = CheckCollisionPointRec(GetMousePosition(), buttonRectangle);
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && mouseOverButton) {
+    CommandCtx commandCtx = (CommandCtx){.buyTower = {.towerType = towerType}};
+    pushCommand(COMMAND_TYPE_BUY_TOWER, computeBuyTowerCommand, commandCtx);
+  }
+
+  Texture buttonTexture = floatingMenuAssets[mouseOverButton ? FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER : FLOATING_MENU_ASSET_BUTTON_DEFAULT];
+  NPatchInfo nPatchInfo = {.source = {0, 0, buttonTexture.width, buttonTexture.height},
+                           .left = buttonTexture.width / 2,
+                           .right = buttonTexture.width / 2,
+                           .top = buttonTexture.height / 2,
+                           .bottom = buttonTexture.height / 2,
+                           .layout = NPATCH_NINE_PATCH};
+
+  Vector2 buttonTextSize = MeasureTextEx(font, BUTTON_LABEL_BUY, 16, 1);
+  Vector2 buttonTextPos = {
+      .x = buttonRectangle.x + buttonRectangle.width / 2 - buttonTextSize.x / 2,
+      .y = buttonRectangle.y + buttonRectangle.height / 2 - buttonTextSize.y / 2,
+  };
+
+  // TODO printar o status da tower entre a imagem e o botão
+
+  DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
+  DrawTexture(texture, drawAt.x, drawAt.y, RAYWHITE);
+  DrawTextureNPatch(buttonTexture, nPatchInfo, buttonRectangle, (Vector2){0, 0}, 0, WHITE);
+  DrawTextEx(font, BUTTON_LABEL_BUY, buttonTextPos, 16, 1, WHITE);
+
+  return (Vector2){.x = drawAt.x, .y = drawAt.y + texture.height + FLOATING_MENU_ITEMS_PADDING};
+}
+
+void drawShoppingFloatingMenu() {
+  Vector2 size = {8, 11};
+  Vector2 drawAt = drawRawFloatingMenu(size, "SHOPPING");
+
+  for (int i = 0; i < TOWER_TYPE_COUNT; i++) {
+    drawAt = drawBuyTowerWidget(i, size, drawAt);
+  }
+}
+
+void drawFloatingMenu() {
+  switch (currentFloatingMenuOpen) {
+  case FLOATING_MENU_TYPE_SHOPPING:
+    drawShoppingFloatingMenu();
+    break;
+  case FLOATING_MENU_TYPE_PAUSE:
+    drawPauseFloatingMenu();
+    break;
+  case FLOATING_MENU_TYPE_GAMEOVER:
+    break;
+  case FLOATING_MENU_TYPE_NONE:
+    break;
+  }
+}
+
+// ================================================== PLACEMENT ==================================================
+
+void drawPlacement() {
+  if (!placement.active) {
+    return;
+  }
+
+  Vector2 pos = GetMousePosition();
+  bool canBePlaced = placement.validatePlacement(placement.ctx, pos);
+  placement.drawPlacementGhost(placement.ctx, pos, canBePlaced);
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && canBePlaced) {
+    TraceLog(LOG_DEBUG, "placed (%f, %f)", pos.x, pos.y);
+    placement.confirmPlacement(placement.ctx, pos);
+    placement.active = false;
+  }
+}
 
 // ================================================== ASSETS ==================================================
 
@@ -758,6 +1202,13 @@ void loadAssets() {
   sceneTextures[SCENE_TEXTURE_CORNER_BR_TILE] = LoadTexture("assets/sprites/corner_br_tile.png");
   sceneTextures[SCENE_TEXTURE_CORNER_TL_TILE] = LoadTexture("assets/sprites/corner_tl_tile.png");
   sceneTextures[SCENE_TEXTURE_CORNER_TR_TILE] = LoadTexture("assets/sprites/corner_tr_tile.png");
+
+  floatingMenuAssets[FLOATING_MENU_ASSET_BASE] = LoadTexture("assets/sprites/floating_menu_base.png");
+  floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_LEFT] = LoadTexture("assets/sprites/floating_menu_header_left.png");
+  floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_CENTER] = LoadTexture("assets/sprites/floating_menu_header_center.png");
+  floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_RIGHT] = LoadTexture("assets/sprites/floating_menu_header_right.png");
+  floatingMenuAssets[FLOATING_MENU_ASSET_BUTTON_DEFAULT] = LoadTexture("assets/sprites/floating_menu_button_default.png");
+  floatingMenuAssets[FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER] = LoadTexture("assets/sprites/floating_menu_button_default_hover.png");
 }
 
 void unloadAssets() {
@@ -778,18 +1229,36 @@ void unloadAssets() {
 // ================================================== MAIN ==================================================
 
 void updateState() {
+  computeFloatingMenuKeys();
+
+  if (currentFloatingMenuOpen == FLOATING_MENU_TYPE_PAUSE) {
+    return;
+  }
+
   float dt = GetFrameTime();
 
+  computeCommands();
   computeSpawnEnemy(dt);
   computeSpawnWave(dt);
   computeBullet(dt);
 
   computeEnemiesMovement(dt);
   updateTowerState();
+  computeWaveState();
+  computeNotificationDuration(dt);
+}
 
-  if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
-    gameState.nextWaveSpawnTimer = 0;
-  }
+void draw() {
+  drawBakedScene();
+  drawEnemies();
+  drawBullets();
+  drawTowers();
+  drawNotifications();
+
+  drawHud();
+
+  drawPlacement();
+  drawFloatingMenu();
 }
 
 int main(void) {
@@ -806,7 +1275,9 @@ int main(void) {
   SetRandomSeed(seed);
 
   InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
+
   SetTargetFPS(60);
+  SetExitKey(KEY_Q);
 
   loadAssets();
 
@@ -819,13 +1290,7 @@ int main(void) {
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
-
-    drawBakedScene();
-    drawEnemies();
-    drawBullets();
-    drawTowers();
-
-    drawHud();
+    draw();
 
     EndDrawing();
   }
