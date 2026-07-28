@@ -24,7 +24,9 @@
 #define BUTTON_LABEL_BUY "Buy"
 
 #define FLOATING_MENU_ITEMS_PADDING 10
+
 #define ARRAY_LEN(a) (int)(sizeof(a) / sizeof((a)[0]))
+#define MATH_MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MATH_MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // ================================================== SHARED STATE ==================================================
@@ -90,9 +92,10 @@ typedef struct {
   Vector2 size;
   Color color;
   int targetIndex;
-  int lifePoints;
   EnemyType type;
   float angle;
+
+  EnemyStat stats;
 } Enemy;
 
 Enemy enemies[64];
@@ -621,6 +624,21 @@ void computeWaveState() {
 
 // ================================================== ENEMY ==================================================
 
+EnemyStat computeEnemyStats(EnemyType enemyType) {
+  EnemyStat defaultStats = enemyStats[enemyType];
+  if (gameState.wave < 5) {
+    return defaultStats;
+  }
+
+  float multiplier = MATH_MAX(gameState.wave / 5.0f, 1.0f);
+  return (EnemyStat){
+      .healthPoints = defaultStats.healthPoints * multiplier,
+      .speedMultiplier = defaultStats.speedMultiplier,
+      .gold = defaultStats.gold * multiplier,
+      .damage = defaultStats.damage * multiplier,
+  };
+}
+
 void spawnEnemy() {
   if (gameState.waitingNextWave) {
     return;
@@ -636,7 +654,7 @@ void spawnEnemy() {
   enemy->size = Vector2Scale(TILE_AS_VECTOR2, 0.8f);
   enemy->color = RED;
   enemy->targetIndex = 1;
-  enemy->lifePoints = enemyStats[enemy->type].healthPoints;
+  enemy->stats = computeEnemyStats(enemy->type);
 
   if (++enemyCount > (ENEMY_PER_WAVE * gameState.wave)) {
     gameState.waitingNextWave = true;
@@ -659,14 +677,14 @@ void computeEnemiesMovement(float dt) {
     }
 
     Vector2 target = path[enemy->targetIndex];
-    enemy->pos = Vector2MoveTowards(enemy->pos, target, (gameState.speed * enemyStats[enemy->type].speedMultiplier) * dt);
+    enemy->pos = Vector2MoveTowards(enemy->pos, target, (gameState.speed * enemy->stats.speedMultiplier) * dt);
     if (Vector2Equals(enemy->pos, target)) {
       enemy->targetIndex++;
     }
 
     if (enemy->targetIndex == pathCount) {
       enemy->active = false;
-      player.lifePoints -= enemyStats[enemy->type].damage;
+      player.lifePoints -= enemy->stats.damage;
       continue;
     }
 
@@ -919,11 +937,11 @@ void computeBulletHit(Bullet *bullet) {
   }
 
   bullet->active = false;
-  enemy->lifePoints -= 10;
+  enemy->stats.healthPoints -= 10;
 
-  if (enemy->lifePoints <= 0) {
+  if (enemy->stats.healthPoints <= 0) {
     enemy->active = false;
-    player.gold += enemyStats[enemy->type].gold;
+    player.gold += enemy->stats.gold;
   }
 }
 
