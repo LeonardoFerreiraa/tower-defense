@@ -19,11 +19,12 @@
 #define NOTIFICATION_DURATION 5
 
 #define MYBROWN (Color){129, 89, 46, 255}
+#define MYBROWN_DARK (Color){77, 53, 28, 255}
 
 #define BUTTON_LABEL_BUY "Buy"
 
 #define FLOATING_MENU_ITEMS_PADDING 10
-#define COUNT_OF(a) (int)(sizeof(a) / sizeof((a)[0]))
+#define ARRAY_LEN(a) (int)(sizeof(a) / sizeof((a)[0]))
 #define MATH_MIN(a, b) ((a) < (b) ? (a) : (b))
 
 // ================================================== SHARED STATE ==================================================
@@ -304,7 +305,7 @@ void *resolveEntity(EntityWrapper entityWrapper) {
   switch (entityWrapper.type) {
 
   case ENTITY_WRAPPER_TYPE_ENEMY: {
-    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= COUNT_OF(enemies)) {
+    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= ARRAY_LEN(enemies)) {
       return NULL;
     }
 
@@ -315,7 +316,7 @@ void *resolveEntity(EntityWrapper entityWrapper) {
     return NULL;
   }
   case ENTITY_WRAPPER_TYPE_TOWER: {
-    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= COUNT_OF(towers)) {
+    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= ARRAY_LEN(towers)) {
       return NULL;
     }
 
@@ -326,7 +327,7 @@ void *resolveEntity(EntityWrapper entityWrapper) {
     return NULL;
   }
   case ENTITY_WRAPPER_TYPE_BULLET: {
-    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= COUNT_OF(bullets)) {
+    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= ARRAY_LEN(bullets)) {
       return NULL;
     }
 
@@ -346,7 +347,7 @@ unsigned int nextEntityId() {
   return ++seq;
 }
 
-#define NEW_ENTITY(list) newEntity((list), COUNT_OF(list), sizeof((list)[0]))
+#define NEW_ENTITY(list) newEntity((list), ARRAY_LEN(list), sizeof((list)[0]))
 
 void *newEntity(void *list, int count, size_t stride) {
   typedef struct {
@@ -381,7 +382,7 @@ void pushCommand(CommandType type, void (*computeCommand)(CommandCtx ctx), Comma
 }
 
 void computeCommands() {
-  for (int i = 0; i < COUNT_OF(commands); i++) {
+  for (int i = 0; i < ARRAY_LEN(commands); i++) {
     Command *command = &commands[i];
     if (!command->active) {
       continue;
@@ -407,7 +408,7 @@ void pushNotification(NotificationType type, char *message) {
 }
 
 void computeNotificationDuration(float dt) {
-  for (int i = 0; i < COUNT_OF(notifications); i++) {
+  for (int i = 0; i < ARRAY_LEN(notifications); i++) {
     Notification *notification = &notifications[i];
     if (!notification->active) {
       continue;
@@ -426,7 +427,7 @@ void drawNotification(Notification *notification) {
 }
 
 void drawNotifications() {
-  for (int i = 0; i < COUNT_OF(notifications); i++) {
+  for (int i = 0; i < ARRAY_LEN(notifications); i++) {
     Notification *notification = &notifications[i];
     if (!notification->active) {
       continue;
@@ -504,7 +505,7 @@ void buildPath() {
     if (!moved) {
       break;
     }
-  } while (pathCount < COUNT_OF(path));
+  } while (pathCount < ARRAY_LEN(path));
 }
 
 void drawOnTile(int row, int col, int textureIndex) {
@@ -591,7 +592,7 @@ void nextLevel() {
 // ================================================== WAVE ==================================================
 
 bool waveEnded() {
-  for (int i = 0; i < COUNT_OF(enemies); i++) {
+  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
     if (enemies[i].active) {
       return false;
     }
@@ -651,7 +652,7 @@ void computeSpawnEnemy(float dt) {
 }
 
 void computeEnemiesMovement(float dt) {
-  for (int i = 0; i < COUNT_OF(enemies); i++) {
+  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
     Enemy *enemy = &enemies[i];
     if (!enemy->active) {
       continue;
@@ -684,7 +685,7 @@ void drawEnemy(Enemy *enemy) {
 }
 
 void drawEnemies() {
-  for (int i = 0; i < COUNT_OF(enemies); i++) {
+  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
     Enemy *enemy = &enemies[i];
     if (enemy->active) {
       drawEnemy(enemy);
@@ -695,7 +696,7 @@ void drawEnemies() {
 // ================================================== TOWER ==================================================
 
 bool retrieveTowerTarget(Tower *tower, EntityWrapper *out) {
-  for (int i = 0; i < COUNT_OF(enemies); i++) {
+  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
     Enemy *enemy = &enemies[i];
     if (!enemy->active) {
       continue;
@@ -735,7 +736,7 @@ void spawnTower(TowerType towerType, Vector2 pos) {
 }
 
 void computeTowerAngle() {
-  for (int i = 0; i < COUNT_OF(towers); i++) {
+  for (int i = 0; i < ARRAY_LEN(towers); i++) {
     Tower *tower = &towers[i];
     if (!tower->active) {
       continue;
@@ -769,7 +770,7 @@ void drawTower(Tower *tower) {
 }
 
 void drawTowers() {
-  for (int i = 0; i < COUNT_OF(towers); i++) {
+  for (int i = 0; i < ARRAY_LEN(towers); i++) {
     Tower *tower = &towers[i];
     if (tower->active) {
       drawTower(tower);
@@ -798,7 +799,7 @@ bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
     return false;
   }
 
-  for (int i = 0; i < COUNT_OF(towers); i++) {
+  for (int i = 0; i < ARRAY_LEN(towers); i++) {
     Tower tower = towers[i];
     if (!tower.active) {
       continue;
@@ -885,7 +886,7 @@ void spawnBullet(Tower *tower, EntityWrapper target) {
 }
 
 void computeSpawnBullet(float dt) {
-  for (int i = 0; i < COUNT_OF(towers); i++) {
+  for (int i = 0; i < ARRAY_LEN(towers); i++) {
     Tower *tower = &towers[i];
     if (!tower->active) {
       continue;
@@ -923,7 +924,7 @@ void computeBulletHit(Bullet *bullet) {
 }
 
 void computeBulletsMovement(float dt) {
-  for (int i = 0; i < COUNT_OF(bullets); i++) {
+  for (int i = 0; i < ARRAY_LEN(bullets); i++) {
     Bullet *bullet = &bullets[i];
     if (!bullet->active) {
       continue;
@@ -947,7 +948,7 @@ void drawBullet(Bullet bullet) {
 }
 
 void drawBullets() {
-  for (int i = 0; i < COUNT_OF(bullets); i++) {
+  for (int i = 0; i < ARRAY_LEN(bullets); i++) {
     Bullet bullet = bullets[i];
     if (bullet.active) {
       drawBullet(bullet);
@@ -962,32 +963,9 @@ void computeBullet(float dt) {
 
 // ================================================== HUD ==================================================
 
-void drawDebugGrid() {
-  for (int col = 0; col <= GRID_COLS; col++) {
-    int x = col * TILE;
-    DrawLineDashed((Vector2){x, 0}, (Vector2){x, GRID_ROWS * TILE}, 5, 5, LIGHTGRAY);
-  }
-  for (int row = 0; row <= GRID_ROWS; row++) {
-    int y = row * TILE;
-    DrawLineDashed((Vector2){0, y}, (Vector2){GRID_COLS * TILE, y}, 5, 5, LIGHTGRAY);
-  }
-  for (int i = 0; i < COUNT_OF(towers); i++) {
-    Tower tower = towers[i];
-    if (tower.active) {
-      DrawCircleLinesV(tower.pos, tower.range, LIGHTGRAY);
-    }
-  }
-}
-
-float drawStat(float x, const char *fmt, ...) {
-  char buf[64];
-  va_list args;
-  va_start(args, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, args);
-  va_end(args);
-
-  Vector2 size = MeasureTextEx(font, buf, 16, 1);
-  DrawTextEx(font, buf, (Vector2){x, (TILE - size.y) / 2}, 16, 1, RAYWHITE);
+float drawStat(float x, const char *msg) {
+  Vector2 size = MeasureTextEx(font, msg, font.baseSize, 1);
+  DrawTextEx(font, msg, (Vector2){x, (TILE - size.y) / 2}, font.baseSize, 1, RAYWHITE);
   return x + size.x + 15;
 }
 
@@ -996,24 +974,20 @@ void drawHud() {
   DrawRectangle(0, 0, maxWidth, TILE, MYBROWN);
 
   float x = 10;
-  x = drawStat(x, "Life: %d", player.lifePoints);
-  x = drawStat(x, "Wave: %d", gameState.wave);
-  x = drawStat(x, "Gold: %d", player.gold);
+  x = drawStat(x, TextFormat("Life: %d", player.lifePoints));
+  x = drawStat(x, TextFormat("Wave: %d", gameState.wave));
+  x = drawStat(x, TextFormat("Gold: %d", player.gold));
   if (waveEnded()) {
     if (gameState.nextWaveSpawnTimer > 0) {
-      x = drawStat(x, "Next Wave In: %.0f", (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - gameState.nextWaveSpawnTimer));
+      x = drawStat(x, TextFormat("Next Wave In: %.0f", (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - gameState.nextWaveSpawnTimer)));
     }
   } else {
     int remainingEnemies = ENEMY_PER_WAVE * gameState.wave - enemyCount + 1;
-    x = drawStat(x, "Remaining Enemies To Spawn: %d", remainingEnemies);
+    x = drawStat(x, TextFormat("Remaining Enemies To Spawn: %d", remainingEnemies));
   }
 
   int maxHeight = GetScreenHeight();
   DrawRectangle(0, maxHeight - TILE, maxWidth, TILE, MYBROWN);
-
-#ifdef DEBUG_ENABLED
-  drawDebugGrid();
-#endif
 }
 
 // ================================================== FLOATING MENU ==================================================
@@ -1066,8 +1040,6 @@ Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
     return (Vector2){0, 0};
   }
 
-  int fontSize = 16;
-
   Vector2 floatingTileSize = {floatingMenuAssets[FLOATING_MENU_ASSET_BASE].width, floatingMenuAssets[FLOATING_MENU_ASSET_BASE].height};
 
   NPatchInfo nPatchInfo = {.source = {0, 0, floatingTileSize.x, floatingTileSize.y},
@@ -1086,8 +1058,8 @@ Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
 
   drawFloatingMenuHeaderStrip(floatingTileSize, baseDest);
 
-  Vector2 textSize = MeasureTextEx(font, headerText, fontSize, 1);
-  DrawTextEx(font, headerText, (Vector2){baseDest.x + baseDest.width / 2 - textSize.x / 2, baseDest.y - textSize.y / 2}, fontSize, 1, RAYWHITE);
+  Vector2 textSize = MeasureTextEx(font, headerText, font.baseSize, 1);
+  DrawTextEx(font, headerText, (Vector2){baseDest.x + baseDest.width / 2 - textSize.x / 2, baseDest.y - textSize.y / 2}, font.baseSize, 1, RAYWHITE);
 
   return (Vector2){baseDest.x + TILE, baseDest.y + TILE * 0.75};
 }
@@ -1099,11 +1071,12 @@ void drawPauseFloatingMenu() {
 }
 
 Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
-  Texture2D texture = towerTextures[towerType];
+  Texture2D towerTexture = towerTextures[towerType];
+  TowerStat towerStat = towerStats[towerType];
 
-  Rectangle rectangleWrapper = (Rectangle){drawAt.x, drawAt.y, (size.x - 2) * TILE, texture.height};
+  Rectangle rectangleWrapper = (Rectangle){drawAt.x, drawAt.y, (size.x - 2) * TILE, towerTexture.height};
 
-  Vector2 buttonSize = {100, 50};
+  Vector2 buttonSize = {80, 50};
   Rectangle buttonRectangle = {.x = rectangleWrapper.x + rectangleWrapper.width - buttonSize.x - FLOATING_MENU_ITEMS_PADDING, //
                                .y = rectangleWrapper.y + rectangleWrapper.height - buttonSize.y - FLOATING_MENU_ITEMS_PADDING,
                                .width = buttonSize.x,
@@ -1122,20 +1095,35 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
                            .bottom = buttonTexture.height / 2,
                            .layout = NPATCH_NINE_PATCH};
 
-  Vector2 buttonTextSize = MeasureTextEx(font, BUTTON_LABEL_BUY, 16, 1);
+  Vector2 buttonTextSize = MeasureTextEx(font, BUTTON_LABEL_BUY, font.baseSize, 1);
   Vector2 buttonTextPos = {
       .x = buttonRectangle.x + buttonRectangle.width / 2 - buttonTextSize.x / 2,
       .y = buttonRectangle.y + buttonRectangle.height / 2 - buttonTextSize.y / 2,
   };
 
-  // TODO printar o status da tower entre a imagem e o botão
+  const char *lines[] = {
+      TextFormat("Cost: $%d", towerStat.cost),
+      TextFormat("Range: %0.2f", towerStat.range),
+      TextFormat("Fire Rate: %d/s", towerStat.fireRate),
+      TextFormat("Damage: %0.2f", towerStat.damage),
+  };
+  Vector2 textPos = {
+      .x = drawAt.x + towerTexture.width + FLOATING_MENU_ITEMS_PADDING,
+      .y = drawAt.y + FLOATING_MENU_ITEMS_PADDING * 1.5,
+  };
+  for (int i = 0; i < ARRAY_LEN(lines); i++) {
+    const char *msg = lines[i];
+    Vector2 size = MeasureTextEx(font, msg, font.baseSize, 1);
+    DrawTextEx(font, msg, textPos, font.baseSize, 1, MYBROWN_DARK);
+    textPos.y += size.y + FLOATING_MENU_ITEMS_PADDING;
+  }
 
   DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
-  DrawTexture(texture, drawAt.x, drawAt.y, RAYWHITE);
+  DrawTexture(towerTexture, drawAt.x, drawAt.y, RAYWHITE);
   DrawTextureNPatch(buttonTexture, nPatchInfo, buttonRectangle, (Vector2){0, 0}, 0, WHITE);
-  DrawTextEx(font, BUTTON_LABEL_BUY, buttonTextPos, 16, 1, WHITE);
+  DrawTextEx(font, BUTTON_LABEL_BUY, buttonTextPos, font.baseSize, 1, WHITE);
 
-  return (Vector2){.x = drawAt.x, .y = drawAt.y + texture.height + FLOATING_MENU_ITEMS_PADDING};
+  return (Vector2){.x = drawAt.x, .y = drawAt.y + towerTexture.height + FLOATING_MENU_ITEMS_PADDING};
 }
 
 void drawShoppingFloatingMenu() {
@@ -1215,18 +1203,35 @@ void unloadAssets() {
   UnloadFont(font);
   UnloadRenderTexture(sceneBaked);
 
-  for (int i = 0; i < COUNT_OF(enemyTextures); i++) {
+  for (int i = 0; i < ARRAY_LEN(enemyTextures); i++) {
     UnloadTexture(enemyTextures[i]);
   }
-  for (int i = 0; i < COUNT_OF(towerTextures); i++) {
+  for (int i = 0; i < ARRAY_LEN(towerTextures); i++) {
     UnloadTexture(towerTextures[i]);
   }
-  for (int i = 0; i < COUNT_OF(sceneTextures); i++) {
+  for (int i = 0; i < ARRAY_LEN(sceneTextures); i++) {
     UnloadTexture(sceneTextures[i]);
   }
 }
 
 // ================================================== MAIN ==================================================
+
+void drawDebugGrid() {
+  for (int col = 0; col <= GRID_COLS; col++) {
+    int x = col * TILE;
+    DrawLineDashed((Vector2){x, 0}, (Vector2){x, GRID_ROWS * TILE}, 5, 5, LIGHTGRAY);
+  }
+  for (int row = 0; row <= GRID_ROWS; row++) {
+    int y = row * TILE;
+    DrawLineDashed((Vector2){0, y}, (Vector2){GRID_COLS * TILE, y}, 5, 5, LIGHTGRAY);
+  }
+  for (int i = 0; i < ARRAY_LEN(towers); i++) {
+    Tower tower = towers[i];
+    if (tower.active) {
+      DrawCircleLinesV(tower.pos, tower.range, LIGHTGRAY);
+    }
+  }
+}
 
 void updateState() {
   computeFloatingMenuKeys();
@@ -1259,6 +1264,10 @@ void draw() {
 
   drawPlacement();
   drawFloatingMenu();
+
+#ifdef DEBUG_ENABLED
+  drawDebugGrid();
+#endif
 }
 
 int main(void) {
