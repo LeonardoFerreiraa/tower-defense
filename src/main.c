@@ -848,9 +848,13 @@ void confirmTowerPlacement(PlacementCtx ctx, Vector2 pos) {
     return;
   }
 
-  // TODO validar gold novamente?
+  TowerType towerType = ctx.tower.towerType;
+  if (player.gold < towerStats[towerType].cost) {
+    TraceLog(LOG_ERROR, "should be unreachable");
+    return;
+  }
 
-  CommandCtx commandCtx = (CommandCtx){.placeTower = {.towerType = ctx.tower.towerType, .pos = pos}};
+  CommandCtx commandCtx = (CommandCtx){.placeTower = {towerType, pos}};
   pushCommand(COMMAND_TYPE_PLACE_TOWER, computePlaceTowerCommand, commandCtx);
 }
 
