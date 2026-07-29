@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
@@ -12,6 +13,7 @@
   (Vector2) {                                                                                                                                                  \
     TILE, TILE                                                                                                                                                 \
   }
+#define VECTOR2_ZERO (Vector2){0, 0}
 
 #define ENEMY_SPAWN_DELAY_IN_SECONDS 1
 #define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
@@ -26,8 +28,31 @@
 #define FLOATING_MENU_ITEMS_PADDING 10
 
 #define ARRAY_LEN(a) (int)(sizeof(a) / sizeof((a)[0]))
-#define MATH_MAX(a, b) ((a) > (b) ? (a) : (b))
-#define MATH_MIN(a, b) ((a) < (b) ? (a) : (b))
+
+#define MATH_MAX(a, b)                                                                                                                                         \
+  ({                                                                                                                                                           \
+    typeof(a) _a = (a);                                                                                                                                        \
+    typeof(b) _b = (b);                                                                                                                                        \
+    _a > _b ? _a : _b;                                                                                                                                         \
+  })
+#define MATH_MIN(a, b)                                                                                                                                         \
+  ({                                                                                                                                                           \
+    typeof(a) _a = (a);                                                                                                                                        \
+    typeof(b) _b = (b);                                                                                                                                        \
+    _a < _b ? _a : _b;                                                                                                                                         \
+  })
+
+#define ENTITY_BASE                                                                                                                                            \
+  bool active;                                                                                                                                                 \
+  unsigned int entityId
+
+#define FOREACH_ACTIVE(var, arr)                                                                                                                               \
+  for (typeof(&(arr)[0]) var = (arr); var < (arr) + ARRAY_LEN(arr); var++)                                                                                     \
+    if (!var->active)                                                                                                                                          \
+      continue;                                                                                                                                                \
+    else
+
+#define ENTITY_INDEX(ptr, arr) ((int)((ptr) - (arr)))
 
 // ================================================== SHARED STATE ==================================================
 
@@ -52,6 +77,8 @@ typedef enum {
   ENTITY_WRAPPER_TYPE_TOWER,
   ENTITY_WRAPPER_TYPE_ENEMY,
   ENTITY_WRAPPER_TYPE_BULLET,
+  ENTITY_WRAPPER_TYPE_COMMAND,
+  ENTITY_WRAPPER_TYPE_NOTIFICATION,
 } EntityWrapperType;
 
 typedef struct {
@@ -83,10 +110,10 @@ EnemyStat enemyStats[] = {
     [ENEMY_TYPE_TANK] = {200, 0.5, 20, 10},
     [ENEMY_TYPE_BOSS] = {100, 1, 20, 10},
 };
+static_assert(ARRAY_LEN(enemyStats) == ENEMY_TYPE_COUNT);
 
 typedef struct {
-  bool active;
-  unsigned int entityId;
+  ENTITY_BASE;
 
   Vector2 pos;
   Vector2 size;
@@ -110,8 +137,20 @@ typedef enum {
 } TowerType;
 
 typedef struct {
-  bool active;
-  unsigned int entityId;
+  int cost;
+  float range;
+  int fireRate;
+  float damage;
+} TowerStat;
+
+TowerStat towerStats[] = {
+    [TOWER_TYPE_NORMAL] = {100, TILE * 2.5f, 2, 20},
+    [TOWER_TYPE_DOUBLE] = {200, TILE * 2.5f, 4, 15},
+};
+static_assert(ARRAY_LEN(towerStats) == TOWER_TYPE_COUNT);
+
+typedef struct {
+  ENTITY_BASE;
 
   Vector2 pos;
   Vector2 size;
@@ -126,23 +165,10 @@ typedef struct {
 } Tower;
 Tower towers[64];
 
-typedef struct {
-  int cost;
-  float range;
-  int fireRate;
-  float damage;
-} TowerStat;
-
-TowerStat towerStats[] = {
-    [TOWER_TYPE_NORMAL] = {100, TILE * 2.5f, 2, 20},
-    [TOWER_TYPE_DOUBLE] = {200, TILE * 2.5f, 4, 15},
-};
-
 // ================================================== BULLET ==================================================
 
 typedef struct {
-  bool active;
-  unsigned int entityId;
+  ENTITY_BASE;
 
   Vector2 pos;
   float size;
@@ -199,7 +225,6 @@ typedef enum {
   FLOATING_MENU_TYPE_GAMEOVER,
   FLOATING_MENU_TYPE_NONE,
 } FloatingMenuType;
-
 FloatingMenuType currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
 
 typedef enum {
@@ -233,8 +258,7 @@ typedef struct {
 } CommandCtx;
 
 typedef struct {
-  bool active;
-  unsigned int entityId;
+  ENTITY_BASE;
 
   CommandType type;
   CommandCtx ctx;
@@ -276,8 +300,7 @@ typedef enum {
 } NotificationType;
 
 typedef struct {
-  bool active;
-  unsigned int entityId;
+  ENTITY_BASE;
 
   NotificationType type;
   char *message;
@@ -305,44 +328,30 @@ Vector2 cellCenter(int col, int row) {
 }
 
 void *resolveEntity(EntityWrapper entityWrapper) {
+#define RESOLVE_ENTITY_INTERNAL(arr)                                                                                                                           \
+  do {                                                                                                                                                         \
+    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= ARRAY_LEN(arr)) {                                                                          \
+      return NULL;                                                                                                                                             \
+    }                                                                                                                                                          \
+    typeof(arr[0]) *entity = &(arr)[entityWrapper.arrayIndex];                                                                                                 \
+    return ((entity)->active && (entity)->entityId == entityWrapper.id) ? entity : NULL;                                                                       \
+  } while (0);
+
   switch (entityWrapper.type) {
-
-  case ENTITY_WRAPPER_TYPE_ENEMY: {
-    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= ARRAY_LEN(enemies)) {
-      return NULL;
-    }
-
-    Enemy *enemy = &enemies[entityWrapper.arrayIndex];
-    if (enemy->active == true && enemy->entityId == entityWrapper.id) {
-      return enemy;
-    }
-    return NULL;
-  }
-  case ENTITY_WRAPPER_TYPE_TOWER: {
-    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= ARRAY_LEN(towers)) {
-      return NULL;
-    }
-
-    Tower *tower = &towers[entityWrapper.arrayIndex];
-    if (tower->active == true && tower->entityId == entityWrapper.id) {
-      return tower;
-    }
-    return NULL;
-  }
-  case ENTITY_WRAPPER_TYPE_BULLET: {
-    if (entityWrapper.arrayIndex < 0 || entityWrapper.arrayIndex >= ARRAY_LEN(bullets)) {
-      return NULL;
-    }
-
-    Bullet *bullet = &bullets[entityWrapper.arrayIndex];
-    if (bullet->active == true && bullet->entityId == entityWrapper.id) {
-      return bullet;
-    }
-    return NULL;
-  }
+  case ENTITY_WRAPPER_TYPE_ENEMY:
+    RESOLVE_ENTITY_INTERNAL(enemies)
+  case ENTITY_WRAPPER_TYPE_TOWER:
+    RESOLVE_ENTITY_INTERNAL(towers)
+  case ENTITY_WRAPPER_TYPE_BULLET:
+    RESOLVE_ENTITY_INTERNAL(bullets)
+  case ENTITY_WRAPPER_TYPE_COMMAND:
+    RESOLVE_ENTITY_INTERNAL(commands)
+  case ENTITY_WRAPPER_TYPE_NOTIFICATION:
+    RESOLVE_ENTITY_INTERNAL(notifications)
   }
 
   return NULL;
+#undef RESOLVE_ENTITY_INTERNAL
 }
 
 unsigned int nextEntityId() {
@@ -354,8 +363,7 @@ unsigned int nextEntityId() {
 
 void *newEntity(void *list, int count, size_t stride) {
   typedef struct {
-    bool active;
-    unsigned int entityId;
+    ENTITY_BASE;
   } EntityBase;
 
   int slot = nextInactiveSlot(list, count, stride);
@@ -385,12 +393,7 @@ void pushCommand(CommandType type, void (*computeCommand)(CommandCtx ctx), Comma
 }
 
 void computeCommands() {
-  for (int i = 0; i < ARRAY_LEN(commands); i++) {
-    Command *command = &commands[i];
-    if (!command->active) {
-      continue;
-    }
-
+  FOREACH_ACTIVE(command, commands) {
     command->computeCommand(command->ctx);
     command->active = false;
   }
@@ -411,12 +414,7 @@ void pushNotification(NotificationType type, char *message) {
 }
 
 void computeNotificationDuration(float dt) {
-  for (int i = 0; i < ARRAY_LEN(notifications); i++) {
-    Notification *notification = &notifications[i];
-    if (!notification->active) {
-      continue;
-    }
-
+  FOREACH_ACTIVE(notification, notifications) {
     notification->duration -= dt;
     if (notification->duration <= 0) {
       notification->active = false;
@@ -427,16 +425,6 @@ void computeNotificationDuration(float dt) {
 void drawNotification(Notification *notification) {
   // TODO improve
   DrawRectangle(100, 100, 100, 50, RED);
-}
-
-void drawNotifications() {
-  for (int i = 0; i < ARRAY_LEN(notifications); i++) {
-    Notification *notification = &notifications[i];
-    if (!notification->active) {
-      continue;
-    }
-    drawNotification(notification);
-  }
 }
 
 // ================================================== SCENE ==================================================
@@ -582,7 +570,8 @@ void bakeScene() {
 }
 
 void drawBakedScene() {
-  DrawTextureRec(sceneBaked.texture, (Rectangle){0, 0, sceneBaked.texture.width, -sceneBaked.texture.height}, (Vector2){0, 0}, RAYWHITE);
+  Rectangle rec = (Rectangle){0, 0, sceneBaked.texture.width, -sceneBaked.texture.height};
+  DrawTextureRec(sceneBaked.texture, rec, VECTOR2_ZERO, RAYWHITE);
 }
 
 void nextLevel() {
@@ -595,12 +584,7 @@ void nextLevel() {
 // ================================================== WAVE ==================================================
 
 bool waveEnded() {
-  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
-    if (enemies[i].active) {
-      return false;
-    }
-  }
-
+  FOREACH_ACTIVE(enemy, enemies) return false;
   return true;
 }
 
@@ -634,7 +618,7 @@ EnemyStat computeEnemyStats(EnemyType enemyType) {
   return (EnemyStat){
       .healthPoints = defaultStats.healthPoints * multiplier,
       .speedMultiplier = defaultStats.speedMultiplier,
-      .gold = defaultStats.gold * multiplier,
+      .gold = defaultStats.gold,
       .damage = defaultStats.damage * multiplier,
   };
 }
@@ -670,12 +654,7 @@ void computeSpawnEnemy(float dt) {
 }
 
 void computeEnemiesMovement(float dt) {
-  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
-    Enemy *enemy = &enemies[i];
-    if (!enemy->active) {
-      continue;
-    }
-
+  FOREACH_ACTIVE(enemy, enemies) {
     Vector2 target = path[enemy->targetIndex];
     enemy->pos = Vector2MoveTowards(enemy->pos, target, (gameState.speed * enemy->stats.speedMultiplier) * dt);
     if (Vector2Equals(enemy->pos, target)) {
@@ -702,29 +681,15 @@ void drawEnemy(Enemy *enemy) {
   DrawTexturePro(texture, source, dest, origin, enemy->angle, RAYWHITE);
 }
 
-void drawEnemies() {
-  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
-    Enemy *enemy = &enemies[i];
-    if (enemy->active) {
-      drawEnemy(enemy);
-    }
-  }
-}
-
 // ================================================== TOWER ==================================================
 
 bool retrieveTowerTarget(Tower *tower, EntityWrapper *out) {
-  for (int i = 0; i < ARRAY_LEN(enemies); i++) {
-    Enemy *enemy = &enemies[i];
-    if (!enemy->active) {
-      continue;
-    }
-
+  FOREACH_ACTIVE(enemy, enemies) {
     float distance = Vector2Distance(tower->pos, enemy->pos);
     if (distance < tower->range) {
       out->type = ENTITY_WRAPPER_TYPE_ENEMY;
       out->id = enemy->entityId;
-      out->arrayIndex = i;
+      out->arrayIndex = ENTITY_INDEX(enemy, enemies);
       return true;
     }
   }
@@ -754,12 +719,7 @@ void spawnTower(TowerType towerType, Vector2 pos) {
 }
 
 void computeTowerAngle() {
-  for (int i = 0; i < ARRAY_LEN(towers); i++) {
-    Tower *tower = &towers[i];
-    if (!tower->active) {
-      continue;
-    }
-
+  FOREACH_ACTIVE(tower, towers) {
     EntityWrapper entityWrapper;
     if (!retrieveTowerTarget(tower, &entityWrapper)) {
       continue;
@@ -787,20 +747,8 @@ void drawTower(Tower *tower) {
   DrawTexturePro(texture, source, dest, origin, tower->angle, RAYWHITE);
 }
 
-void drawTowers() {
-  for (int i = 0; i < ARRAY_LEN(towers); i++) {
-    Tower *tower = &towers[i];
-    if (tower->active) {
-      drawTower(tower);
-    }
-  }
-}
-
 bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
-  if (ctx.type != PLACEMENT_CTX_TYPE_TOWER) {
-    TraceLog(LOG_ERROR, "invalid type");
-    return false;
-  }
+  assert(ctx.type == PLACEMENT_CTX_TYPE_TOWER);
 
   int posX = pos.x / TILE;
   int posY = pos.y / TILE;
@@ -817,14 +765,9 @@ bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
     return false;
   }
 
-  for (int i = 0; i < ARRAY_LEN(towers); i++) {
-    Tower tower = towers[i];
-    if (!tower.active) {
-      continue;
-    }
-
-    int towerPosX = tower.pos.x / TILE;
-    int towerPosY = tower.pos.y / TILE;
+  FOREACH_ACTIVE(tower, towers) {
+    int towerPosX = tower->pos.x / TILE;
+    int towerPosY = tower->pos.y / TILE;
     if (towerPosX == posX && towerPosY == posY) {
       return false;
     }
@@ -834,10 +777,7 @@ bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
 }
 
 void drawTowerPlacementGhost(PlacementCtx ctx, Vector2 pos, bool canBePlaced) {
-  if (ctx.type != PLACEMENT_CTX_TYPE_TOWER) {
-    TraceLog(LOG_ERROR, "invalid type");
-    return;
-  }
+  assert(ctx.type == PLACEMENT_CTX_TYPE_TOWER);
 
   int posX = ((int)(pos.x / TILE)) * TILE + TILE / 2.0f;
   int posY = ((int)(pos.y / TILE)) * TILE + TILE / 2.0f;
@@ -861,10 +801,7 @@ void computePlaceTowerCommand(CommandCtx ctx) {
 }
 
 void confirmTowerPlacement(PlacementCtx ctx, Vector2 pos) {
-  if (ctx.type != PLACEMENT_CTX_TYPE_TOWER) {
-    TraceLog(LOG_ERROR, "invalid type");
-    return;
-  }
+  assert(ctx.type == PLACEMENT_CTX_TYPE_TOWER);
 
   TowerType towerType = ctx.tower.towerType;
   if (player.gold < towerStats[towerType].cost) {
@@ -908,12 +845,7 @@ void spawnBullet(Tower *tower, EntityWrapper target) {
 }
 
 void computeSpawnBullet(float dt) {
-  for (int i = 0; i < ARRAY_LEN(towers); i++) {
-    Tower *tower = &towers[i];
-    if (!tower->active) {
-      continue;
-    }
-
+  FOREACH_ACTIVE(tower, towers) {
     tower->bulletCooldown += dt;
     float fireInterval = 1.0f / tower->fireRate;
     if (tower->bulletCooldown < fireInterval) {
@@ -946,11 +878,7 @@ void computeBulletHit(Bullet *bullet) {
 }
 
 void computeBulletsMovement(float dt) {
-  for (int i = 0; i < ARRAY_LEN(bullets); i++) {
-    Bullet *bullet = &bullets[i];
-    if (!bullet->active) {
-      continue;
-    }
+  FOREACH_ACTIVE(bullet, bullets) {
     Enemy *enemy = resolveEntity(bullet->target);
     if (enemy == NULL) {
       bullet->active = false;
@@ -965,17 +893,8 @@ void computeBulletsMovement(float dt) {
   }
 }
 
-void drawBullet(Bullet bullet) {
-  DrawCircleV(bullet.pos, bullet.size, bullet.color);
-}
-
-void drawBullets() {
-  for (int i = 0; i < ARRAY_LEN(bullets); i++) {
-    Bullet bullet = bullets[i];
-    if (bullet.active) {
-      drawBullet(bullet);
-    }
-  }
+void drawBullet(Bullet *bullet) {
+  DrawCircleV(bullet->pos, bullet->size, bullet->color);
 }
 
 void computeBullet(float dt) {
@@ -1059,7 +978,7 @@ void drawFloatingMenuHeaderStrip(Vector2 floatingTileSize, Rectangle baseDest) {
 Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
   if (sizeInTiles.x < 5 || sizeInTiles.x > GRID_COLS || sizeInTiles.y < 0 || sizeInTiles.y > GRID_ROWS) {
     TraceLog(LOG_ERROR, "invalid size");
-    return (Vector2){0, 0};
+    return VECTOR2_ZERO;
   }
 
   Vector2 floatingTileSize = {floatingMenuAssets[FLOATING_MENU_ASSET_BASE].width, floatingMenuAssets[FLOATING_MENU_ASSET_BASE].height};
@@ -1076,7 +995,7 @@ Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
                         .width = TILE * sizeInTiles.x,               //
                         .height = TILE * sizeInTiles.y};
 
-  DrawTextureNPatch(floatingMenuAssets[FLOATING_MENU_ASSET_BASE], nPatchInfo, baseDest, (Vector2){0, 0}, 0, WHITE);
+  DrawTextureNPatch(floatingMenuAssets[FLOATING_MENU_ASSET_BASE], nPatchInfo, baseDest, VECTOR2_ZERO, 0, WHITE);
 
   drawFloatingMenuHeaderStrip(floatingTileSize, baseDest);
 
@@ -1142,7 +1061,7 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
 
   DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
   DrawTexture(towerTexture, drawAt.x, drawAt.y, RAYWHITE);
-  DrawTextureNPatch(buttonTexture, nPatchInfo, buttonRectangle, (Vector2){0, 0}, 0, WHITE);
+  DrawTextureNPatch(buttonTexture, nPatchInfo, buttonRectangle, VECTOR2_ZERO, 0, WHITE);
   DrawTextEx(font, BUTTON_LABEL_BUY, buttonTextPos, font.baseSize, 1, WHITE);
 
   return (Vector2){.x = drawAt.x, .y = drawAt.y + towerTexture.height + FLOATING_MENU_ITEMS_PADDING};
@@ -1277,10 +1196,10 @@ void updateState() {
 
 void draw() {
   drawBakedScene();
-  drawEnemies();
-  drawBullets();
-  drawTowers();
-  drawNotifications();
+  FOREACH_ACTIVE(enemy, enemies) drawEnemy(enemy);
+  FOREACH_ACTIVE(bullet, bullets) drawBullet(bullet);
+  FOREACH_ACTIVE(tower, towers) drawTower(tower);
+  FOREACH_ACTIVE(notification, notifications) drawNotification(notification);
 
   drawHud();
 

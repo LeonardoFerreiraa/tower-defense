@@ -1,7 +1,7 @@
 RAYLIB_PREFIX = /opt/homebrew
 
-CC = cc
-CFLAGS = -std=c99 -Wall -Wextra -Wimplicit-fallthrough -I$(RAYLIB_PREFIX)/include -Isrc
+CC = clang
+CFLAGS = -std=gnu23 -Wall -Wextra -Wimplicit-fallthrough -fms-extensions -I$(RAYLIB_PREFIX)/include -Isrc
 LDFLAGS = -L$(RAYLIB_PREFIX)/lib -lraylib
 
 BUILD = build
