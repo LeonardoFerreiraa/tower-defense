@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -18,7 +17,7 @@
 #define ENEMY_SPAWN_DELAY_IN_SECONDS 1
 #define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
 #define ENEMY_PER_WAVE 5
-#define NOTIFICATION_DURATION 5
+#define NOTIFICATION_DURATION 5.0f
 
 #define MYBROWN (Color){129, 89, 46, 255}
 #define MYBROWN_DARK (Color){77, 53, 28, 255}
@@ -26,6 +25,7 @@
 #define BUTTON_LABEL_BUY "Buy"
 
 #define FLOATING_MENU_ITEMS_PADDING 10
+#define NOTIFICATION_PADDING 10
 
 #define ARRAY_LEN(a) (int)(sizeof(a) / sizeof((a)[0]))
 
@@ -190,6 +190,7 @@ typedef enum {
   SCENE_TEXTURE_CORNER_BR_TILE,
   SCENE_TEXTURE_CORNER_TL_TILE,
   SCENE_TEXTURE_CORNER_TR_TILE,
+  SCENE_NOTIFICATION_TOAST,
   SCENE_TEXTURE_CORNER_COUNT
 } SceneAsset;
 
@@ -295,8 +296,7 @@ struct {
 // ================================================== NOTIFICATION ==================================================
 
 typedef enum {
-  NOTIFICATION_TYPE_SUCCESS,
-  NOTIFICATION_TYPE_FAILURE,
+  NOTIFICATION_TYPE_TOAST,
 } NotificationType;
 
 typedef struct {
@@ -311,17 +311,6 @@ typedef struct {
 Notification notifications[32];
 
 // ================================================== UTILITY ==================================================
-
-int nextInactiveSlot(void *arr, int count, size_t stride) {
-  for (int i = 0; i < count; i++) {
-    bool active = *(bool *)((char *)arr + i * stride);
-    if (!active) {
-      return i;
-    }
-  }
-
-  return -1;
-}
 
 Vector2 cellCenter(int col, int row) {
   return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f};
@@ -354,6 +343,17 @@ void *resolveEntity(EntityWrapper entityWrapper) {
 #undef RESOLVE_ENTITY_INTERNAL
 }
 
+int nextInactiveSlot(void *arr, int count, size_t stride) {
+  for (int i = 0; i < count; i++) {
+    bool active = *(bool *)((char *)arr + i * stride);
+    if (!active) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 unsigned int nextEntityId() {
   static unsigned int seq = 0;
   return ++seq;
@@ -376,6 +376,17 @@ void *newEntity(void *list, int count, size_t stride) {
   entity->entityId = nextEntityId();
 
   return entity;
+}
+
+NPatchInfo buildNPatchInfoOnTexture(Texture texture) {
+  return (NPatchInfo){
+      .source = {0, 0, texture.width, texture.height},
+      .left = texture.width / 2,
+      .right = texture.width / 2,
+      .top = texture.height / 2,
+      .bottom = texture.height / 2,
+      .layout = NPATCH_NINE_PATCH,
+  };
 }
 
 // ================================================== COMMANDS ==================================================
@@ -422,9 +433,56 @@ void computeNotificationDuration(float dt) {
   }
 }
 
-void drawNotification(Notification *notification) {
-  // TODO improve
-  DrawRectangle(100, 100, 100, 50, RED);
+void drawNotificationLine(Notification *notification, Rectangle baseDest, Vector2 textPosition, Vector2 textSize) {
+  float start = baseDest.x + NOTIFICATION_PADDING;
+  float end = baseDest.x + baseDest.width - NOTIFICATION_PADDING;
+  float remaining = notification->duration / NOTIFICATION_DURATION;
+
+  Vector2 startPos = (Vector2){
+      end - ((end - start) * remaining),
+      textPosition.y + textSize.y + NOTIFICATION_PADDING,
+  };
+  Vector2 endPos = (Vector2){
+      baseDest.x + baseDest.width - NOTIFICATION_PADDING,
+      textPosition.y + textSize.y + NOTIFICATION_PADDING,
+  };
+  DrawLineEx(startPos, endPos, 3, DARKBROWN);
+}
+
+float drawNotification(Notification *notification, float drawAt) {
+  Vector2 textSize = MeasureTextEx(font, notification->message, font.baseSize, 1);
+
+  Texture texture = sceneTextures[SCENE_NOTIFICATION_TOAST];
+  NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(texture);
+
+  Vector2 size = (Vector2){
+      textSize.x + 2 * NOTIFICATION_PADDING,
+      textSize.y + 3 * NOTIFICATION_PADDING,
+  };
+  Rectangle baseDest = {
+      .x = GRID_COLS * TILE - size.x - NOTIFICATION_PADDING,
+      .y = drawAt + NOTIFICATION_PADDING,
+      .width = size.x,
+      .height = size.y,
+  };
+  DrawTextureNPatch(texture, nPatchInfo, baseDest, VECTOR2_ZERO, 0, WHITE);
+
+  Vector2 textPosition = (Vector2){
+      baseDest.x + NOTIFICATION_PADDING,
+      baseDest.y + NOTIFICATION_PADDING,
+  };
+  DrawTextEx(font, notification->message, textPosition, font.baseSize, 1, DARKBROWN);
+
+  drawNotificationLine(notification, baseDest, textPosition, textSize);
+
+  return baseDest.y + size.y;
+}
+
+void drawNotifications() {
+  float drawAt = TILE;
+  FOREACH_ACTIVE(notification, notifications) {
+    drawAt = drawNotification(notification, drawAt);
+  }
 }
 
 // ================================================== SCENE ==================================================
@@ -819,7 +877,7 @@ void computeBuyTowerCommand(CommandCtx ctx) {
 
   TowerStat towerStat = towerStats[towerType];
   if (player.gold < towerStat.cost) {
-    pushNotification(NOTIFICATION_TYPE_FAILURE, "Insufficient Gold");
+    pushNotification(NOTIFICATION_TYPE_TOAST, "Insufficient Gold");
     return;
   }
 
@@ -981,21 +1039,19 @@ Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
     return VECTOR2_ZERO;
   }
 
-  Vector2 floatingTileSize = {floatingMenuAssets[FLOATING_MENU_ASSET_BASE].width, floatingMenuAssets[FLOATING_MENU_ASSET_BASE].height};
+  Texture texture = floatingMenuAssets[FLOATING_MENU_ASSET_BASE];
+  Vector2 floatingTileSize = {texture.width, texture.height};
 
-  NPatchInfo nPatchInfo = {.source = {0, 0, floatingTileSize.x, floatingTileSize.y},
-                           .left = floatingTileSize.x / 2,
-                           .right = floatingTileSize.x / 2,
-                           .top = floatingTileSize.y / 2,
-                           .bottom = floatingTileSize.y / 2,
-                           .layout = NPATCH_NINE_PATCH};
+  NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(texture);
 
-  Rectangle baseDest = {.x = (GRID_COLS - sizeInTiles.x) / 2 * TILE, //
-                        .y = (GRID_ROWS - sizeInTiles.y) / 2 * TILE, //
-                        .width = TILE * sizeInTiles.x,               //
-                        .height = TILE * sizeInTiles.y};
+  Rectangle baseDest = {
+      .x = (GRID_COLS - sizeInTiles.x) / 2 * TILE,
+      .y = (GRID_ROWS - sizeInTiles.y) / 2 * TILE,
+      .width = TILE * sizeInTiles.x,
+      .height = TILE * sizeInTiles.y,
+  };
 
-  DrawTextureNPatch(floatingMenuAssets[FLOATING_MENU_ASSET_BASE], nPatchInfo, baseDest, VECTOR2_ZERO, 0, WHITE);
+  DrawTextureNPatch(texture, nPatchInfo, baseDest, VECTOR2_ZERO, 0, WHITE);
 
   drawFloatingMenuHeaderStrip(floatingTileSize, baseDest);
 
@@ -1029,12 +1085,7 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
   }
 
   Texture buttonTexture = floatingMenuAssets[mouseOverButton ? FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER : FLOATING_MENU_ASSET_BUTTON_DEFAULT];
-  NPatchInfo nPatchInfo = {.source = {0, 0, buttonTexture.width, buttonTexture.height},
-                           .left = buttonTexture.width / 2,
-                           .right = buttonTexture.width / 2,
-                           .top = buttonTexture.height / 2,
-                           .bottom = buttonTexture.height / 2,
-                           .layout = NPATCH_NINE_PATCH};
+  NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(buttonTexture);
 
   Vector2 buttonTextSize = MeasureTextEx(font, BUTTON_LABEL_BUY, font.baseSize, 1);
   Vector2 buttonTextPos = {
@@ -1131,6 +1182,7 @@ void loadAssets() {
   sceneTextures[SCENE_TEXTURE_CORNER_BR_TILE] = LoadTexture("assets/sprites/corner_br_tile.png");
   sceneTextures[SCENE_TEXTURE_CORNER_TL_TILE] = LoadTexture("assets/sprites/corner_tl_tile.png");
   sceneTextures[SCENE_TEXTURE_CORNER_TR_TILE] = LoadTexture("assets/sprites/corner_tr_tile.png");
+  sceneTextures[SCENE_NOTIFICATION_TOAST] = LoadTexture("assets/sprites/notification_toast.png");
 
   floatingMenuAssets[FLOATING_MENU_ASSET_BASE] = LoadTexture("assets/sprites/floating_menu_base.png");
   floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_LEFT] = LoadTexture("assets/sprites/floating_menu_header_left.png");
@@ -1199,7 +1251,7 @@ void draw() {
   FOREACH_ACTIVE(enemy, enemies) drawEnemy(enemy);
   FOREACH_ACTIVE(bullet, bullets) drawBullet(bullet);
   FOREACH_ACTIVE(tower, towers) drawTower(tower);
-  FOREACH_ACTIVE(notification, notifications) drawNotification(notification);
+  drawNotifications();
 
   drawHud();
 
