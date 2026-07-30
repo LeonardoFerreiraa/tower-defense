@@ -1014,7 +1014,10 @@ void computeFloatingMenuKeys() {
   }
 }
 
-void drawFloatingMenuHeaderStrip(Vector2 floatingTileSize, Rectangle baseDest) {
+void drawFloatingMenuHeaderStrip(Rectangle baseDest) {
+  Texture centerTexture = floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_CENTER];
+  Vector2 floatingTileSize = {centerTexture.width, centerTexture.height};
+
   Vector2 origin = Vector2Scale(floatingTileSize, 0.5f);
   Rectangle source = {0, 0, floatingTileSize.x, floatingTileSize.y};
 
@@ -1027,20 +1030,16 @@ void drawFloatingMenuHeaderStrip(Vector2 floatingTileSize, Rectangle baseDest) {
   float cur = leftDest.x + leftDest.width;
   while (cur < rightDest.x) {
     Rectangle dest = {cur, baseDest.y, MATH_MIN(floatingTileSize.x, rightDest.x - cur), floatingTileSize.y};
-    DrawTexturePro(floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_CENTER], source, dest, origin, 0, RAYWHITE);
+    DrawTexturePro(centerTexture, source, dest, origin, 0, RAYWHITE);
 
     cur += floatingTileSize.x;
   };
 }
 
 Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
-  if (sizeInTiles.x < 5 || sizeInTiles.x > GRID_COLS || sizeInTiles.y < 0 || sizeInTiles.y > GRID_ROWS) {
-    TraceLog(LOG_ERROR, "invalid size");
-    return VECTOR2_ZERO;
-  }
+  assert(sizeInTiles.x > 5 && sizeInTiles.x < GRID_COLS && sizeInTiles.y > 0 && sizeInTiles.y < GRID_ROWS);
 
   Texture texture = floatingMenuAssets[FLOATING_MENU_ASSET_BASE];
-  Vector2 floatingTileSize = {texture.width, texture.height};
 
   NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(texture);
 
@@ -1053,7 +1052,7 @@ Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
 
   DrawTextureNPatch(texture, nPatchInfo, baseDest, VECTOR2_ZERO, 0, WHITE);
 
-  drawFloatingMenuHeaderStrip(floatingTileSize, baseDest);
+  drawFloatingMenuHeaderStrip(baseDest);
 
   Vector2 textSize = MeasureTextEx(font, headerText, font.baseSize, 1);
   DrawTextEx(font, headerText, (Vector2){baseDest.x + baseDest.width / 2 - textSize.x / 2, baseDest.y - textSize.y / 2}, font.baseSize, 1, RAYWHITE);
@@ -1067,32 +1066,8 @@ void drawPauseFloatingMenu() {
   // TODO: improve
 }
 
-Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
-  Texture2D towerTexture = towerTextures[towerType];
+void drawBuyTowerWidgetDescription(TowerType towerType, Texture towerTexture, Vector2 drawAt) {
   TowerStat towerStat = towerStats[towerType];
-
-  Rectangle rectangleWrapper = (Rectangle){drawAt.x, drawAt.y, (size.x - 2) * TILE, towerTexture.height};
-
-  Vector2 buttonSize = {80, 50};
-  Rectangle buttonRectangle = {.x = rectangleWrapper.x + rectangleWrapper.width - buttonSize.x - FLOATING_MENU_ITEMS_PADDING, //
-                               .y = rectangleWrapper.y + rectangleWrapper.height - buttonSize.y - FLOATING_MENU_ITEMS_PADDING,
-                               .width = buttonSize.x,
-                               .height = buttonSize.y};
-  bool mouseOverButton = CheckCollisionPointRec(GetMousePosition(), buttonRectangle);
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && mouseOverButton) {
-    CommandCtx commandCtx = (CommandCtx){.buyTower = {.towerType = towerType}};
-    pushCommand(COMMAND_TYPE_BUY_TOWER, computeBuyTowerCommand, commandCtx);
-  }
-
-  Texture buttonTexture = floatingMenuAssets[mouseOverButton ? FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER : FLOATING_MENU_ASSET_BUTTON_DEFAULT];
-  NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(buttonTexture);
-
-  Vector2 buttonTextSize = MeasureTextEx(font, BUTTON_LABEL_BUY, font.baseSize, 1);
-  Vector2 buttonTextPos = {
-      .x = buttonRectangle.x + buttonRectangle.width / 2 - buttonTextSize.x / 2,
-      .y = buttonRectangle.y + buttonRectangle.height / 2 - buttonTextSize.y / 2,
-  };
-
   const char *lines[] = {
       TextFormat("Cost: $%d", towerStat.cost),
       TextFormat("Range: %0.2f", towerStat.range),
@@ -1109,11 +1084,52 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
     DrawTextEx(font, msg, textPos, font.baseSize, 1, MYBROWN_DARK);
     textPos.y += size.y + FLOATING_MENU_ITEMS_PADDING;
   }
+}
 
-  DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
-  DrawTexture(towerTexture, drawAt.x, drawAt.y, RAYWHITE);
+Rectangle drawBuyTowerWidgetBuyButton(Rectangle rectangleWrapper) {
+  Vector2 buttonSize = {80, 50};
+  Rectangle buttonRectangle = {
+      .x = rectangleWrapper.x + rectangleWrapper.width - buttonSize.x - FLOATING_MENU_ITEMS_PADDING,
+      .y = rectangleWrapper.y + rectangleWrapper.height - buttonSize.y - FLOATING_MENU_ITEMS_PADDING,
+      .width = buttonSize.x,
+      .height = buttonSize.y,
+  };
+
+  bool mouseOverButton = CheckCollisionPointRec(GetMousePosition(), buttonRectangle);
+  Texture buttonTexture = floatingMenuAssets[mouseOverButton ? FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER : FLOATING_MENU_ASSET_BUTTON_DEFAULT];
+  NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(buttonTexture);
   DrawTextureNPatch(buttonTexture, nPatchInfo, buttonRectangle, VECTOR2_ZERO, 0, WHITE);
+
+  Vector2 buttonTextSize = MeasureTextEx(font, BUTTON_LABEL_BUY, font.baseSize, 1);
+  Vector2 buttonTextPos = {
+      .x = buttonRectangle.x + buttonRectangle.width / 2 - buttonTextSize.x / 2,
+      .y = buttonRectangle.y + buttonRectangle.height / 2 - buttonTextSize.y / 2,
+  };
   DrawTextEx(font, BUTTON_LABEL_BUY, buttonTextPos, font.baseSize, 1, WHITE);
+
+  return buttonRectangle;
+}
+
+Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
+  Texture2D towerTexture = towerTextures[towerType];
+  DrawTexture(towerTexture, drawAt.x, drawAt.y, RAYWHITE);
+
+  Rectangle rectangleWrapper = (Rectangle){
+      .x = drawAt.x,
+      .y = drawAt.y,
+      .width = (size.x - 2) * TILE,
+      .height = towerTexture.height,
+  };
+  DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
+
+  Rectangle buttonRectangle = drawBuyTowerWidgetBuyButton(rectangleWrapper);
+
+  drawBuyTowerWidgetDescription(towerType, towerTexture, drawAt);
+
+  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), buttonRectangle)) {
+    CommandCtx commandCtx = (CommandCtx){.buyTower = {.towerType = towerType}};
+    pushCommand(COMMAND_TYPE_BUY_TOWER, computeBuyTowerCommand, commandCtx);
+  }
 
   return (Vector2){.x = drawAt.x, .y = drawAt.y + towerTexture.height + FLOATING_MENU_ITEMS_PADDING};
 }
