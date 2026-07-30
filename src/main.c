@@ -6,6 +6,7 @@
 #include "raymath.h"
 
 #define TILE 80
+#define HALF_TILE TILE / 2.0f
 #define GRID_COLS 20
 #define GRID_ROWS 15
 #define TILE_AS_VECTOR2                                                                                                                                        \
@@ -63,6 +64,13 @@ struct {
   float nextWaveSpawnTimer;
   bool waitingNextWave;
   int level;
+  union {
+    struct {
+      Vector2 pos;
+      bool click;
+      bool clickUsed;
+    } mouse;
+  };
 } gameState = {
     .speed = 200.0f,
     .wave = 1,
@@ -122,6 +130,7 @@ typedef struct {
   EnemyType type;
   float angle;
 
+  // TODO talvez shared attributes igual tower?
   EnemyStat stats;
 } Enemy;
 
@@ -129,6 +138,11 @@ Enemy enemies[64];
 int enemyCount = 0;
 
 // ================================================== TOWER ==================================================
+
+#define TOWER_STATS_SHARED_ATTRIBUTES                                                                                                                          \
+  float range;                                                                                                                                                 \
+  int fireRate;                                                                                                                                                \
+  float damage
 
 typedef enum {
   TOWER_TYPE_NORMAL,
@@ -138,9 +152,7 @@ typedef enum {
 
 typedef struct {
   int cost;
-  float range;
-  int fireRate;
-  float damage;
+  TOWER_STATS_SHARED_ATTRIBUTES;
 } TowerStat;
 
 TowerStat towerStats[] = {
@@ -156,14 +168,32 @@ typedef struct {
   Vector2 size;
   TowerType type;
 
-  float range;
-  int fireRate;
-  float damage;
+  TOWER_STATS_SHARED_ATTRIBUTES;
 
   float bulletCooldown;
   float angle;
 } Tower;
 Tower towers[64];
+
+typedef enum {
+  TOWER_UPGRADE_TYPE_RANGE,
+  TOWER_UPGRADE_TYPE_FIRE_RATE,
+  TOWER_UPGRADE_TYPE_DAMAGE,
+  TOWER_UPGRADE_TYPE_COUNT,
+} TowerUpgradeType;
+
+static const struct {
+  char *label;
+  int cost;
+  int addend;
+} UPGRADE_TOWER_METADATA[TOWER_UPGRADE_TYPE_COUNT] = {
+    [TOWER_UPGRADE_TYPE_RANGE] = {"Range\n%0.2f > %0.2f", 200, TILE},
+    [TOWER_UPGRADE_TYPE_FIRE_RATE] = {"Fire Rate\n%d/s > %d/s", 100, 1},
+    [TOWER_UPGRADE_TYPE_DAMAGE] = {"Damage\n%0.2f > %0.2f", 100, 5},
+};
+static_assert(ARRAY_LEN(UPGRADE_TOWER_METADATA) == TOWER_UPGRADE_TYPE_COUNT);
+
+#undef TOWER_STATS_SHARED_ATTRIBUTES
 
 // ================================================== BULLET ==================================================
 
@@ -225,8 +255,26 @@ typedef enum {
   FLOATING_MENU_TYPE_SHOPPING,
   FLOATING_MENU_TYPE_PAUSE,
   FLOATING_MENU_TYPE_GAMEOVER,
+  FLOATING_MENU_TYPE_TOWER_UPGRADE,
 } FloatingMenuType;
-FloatingMenuType currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
+
+struct {
+  FloatingMenuType type;
+  EntityWrapper entityWrapper;
+} currentFloatingMenuOpen = {0};
+
+static const struct {
+  int key;
+  FloatingMenuType from;
+  FloatingMenuType to;
+} FLOATING_MENU_TRANSITIONS[] = {
+    {KEY_TAB, FLOATING_MENU_TYPE_NONE, FLOATING_MENU_TYPE_SHOPPING},         //
+    {KEY_TAB, FLOATING_MENU_TYPE_SHOPPING, FLOATING_MENU_TYPE_NONE},         //
+    {KEY_ESCAPE, FLOATING_MENU_TYPE_NONE, FLOATING_MENU_TYPE_PAUSE},         //
+    {KEY_ESCAPE, FLOATING_MENU_TYPE_PAUSE, FLOATING_MENU_TYPE_NONE},         //
+    {KEY_ESCAPE, FLOATING_MENU_TYPE_SHOPPING, FLOATING_MENU_TYPE_NONE},      //
+    {KEY_ESCAPE, FLOATING_MENU_TYPE_TOWER_UPGRADE, FLOATING_MENU_TYPE_NONE}, //
+};
 
 typedef enum {
   FLOATING_MENU_ASSET_BASE,
@@ -239,24 +287,9 @@ typedef enum {
 } FloatingMenuAsset;
 Texture2D floatingMenuAssets[FLOATING_MENU_ASSET_COUNT];
 
-static const struct {
-  int key;
-  FloatingMenuType from;
-  FloatingMenuType to;
-} FLOATING_MENU_TRANSITIONS[] = {
-    {KEY_TAB, FLOATING_MENU_TYPE_NONE, FLOATING_MENU_TYPE_SHOPPING},    //
-    {KEY_TAB, FLOATING_MENU_TYPE_SHOPPING, FLOATING_MENU_TYPE_NONE},    //
-    {KEY_ESCAPE, FLOATING_MENU_TYPE_NONE, FLOATING_MENU_TYPE_PAUSE},    //
-    {KEY_ESCAPE, FLOATING_MENU_TYPE_PAUSE, FLOATING_MENU_TYPE_NONE},    //
-    {KEY_ESCAPE, FLOATING_MENU_TYPE_SHOPPING, FLOATING_MENU_TYPE_NONE}, //
-};
+// ================================================== COMMAND ==================================================
 
-// ================================================== COMMANDS ==================================================
-
-typedef enum {
-  COMMAND_TYPE_BUY_TOWER,
-  COMMAND_TYPE_PLACE_TOWER,
-} CommandType;
+typedef enum { COMMAND_TYPE_BUY_TOWER, COMMAND_TYPE_PLACE_TOWER, COMMAND_TYPE_BUY_TOWER_UPGRADE } CommandType;
 
 typedef struct {
   union {
@@ -267,6 +300,10 @@ typedef struct {
       TowerType towerType;
       Vector2 pos;
     } placeTower;
+    struct {
+      EntityWrapper entityWrapper;
+      TowerUpgradeType towerUpgradeType;
+    } buyTowerUpgrade;
   };
 } CommandCtx;
 
@@ -325,7 +362,7 @@ Notification notifications[32];
 // ================================================== UTILITY ==================================================
 
 Vector2 cellCenter(int col, int row) {
-  return (Vector2){col * TILE + TILE / 2.0f, row * TILE + TILE / 2.0f};
+  return (Vector2){col * TILE + HALF_TILE, row * TILE + HALF_TILE};
 }
 
 void *resolveEntity(EntityWrapper entityWrapper) {
@@ -408,7 +445,16 @@ void drawTexture(Texture2D texture, Vector2 pos, Vector2 size, float rotation, C
   DrawTexturePro(texture, source, dest, origin, rotation, color);
 }
 
-// ================================================== COMMANDS ==================================================
+bool checkClickOn(Rectangle target) {
+  if (CheckCollisionPointRec(gameState.mouse.pos, target) && gameState.mouse.click && !gameState.mouse.clickUsed) {
+    gameState.mouse.clickUsed = true;
+    return true;
+  }
+
+  return false;
+}
+
+// ================================================== COMMAND ==================================================
 
 void pushCommand(CommandType type, void (*computeCommand)(CommandCtx ctx), CommandCtx ctx) {
   Command *command = NEW_ENTITY(commands);
@@ -465,7 +511,7 @@ void drawNotificationLine(Notification *notification, Rectangle baseDest, Vector
       baseDest.x + baseDest.width - NOTIFICATION_PADDING,
       textPosition.y + textSize.y + NOTIFICATION_PADDING,
   };
-  DrawLineEx(startPos, endPos, 3, DARKBROWN);
+  DrawLineEx(startPos, endPos, 3, MYBROWN_DARK);
 }
 
 float drawNotification(Notification *notification, float drawAt) {
@@ -490,7 +536,7 @@ float drawNotification(Notification *notification, float drawAt) {
       baseDest.x + NOTIFICATION_PADDING,
       baseDest.y + NOTIFICATION_PADDING,
   };
-  DrawTextEx(font, notification->message, textPosition, font.baseSize, 1, DARKBROWN);
+  DrawTextEx(font, notification->message, textPosition, font.baseSize, 1, MYBROWN_DARK);
 
   drawNotificationLine(notification, baseDest, textPosition, textSize);
 
@@ -814,6 +860,16 @@ void updateTowerState() {
 
 void drawTower(Tower *tower) {
   drawTexture(towerTextures[tower->type], tower->pos, tower->size, tower->angle, WHITE);
+
+  Rectangle towerRectangle = (Rectangle){tower->pos.x - HALF_TILE, tower->pos.y - HALF_TILE, TILE, TILE};
+  if (checkClickOn(towerRectangle)) {
+    currentFloatingMenuOpen.type = FLOATING_MENU_TYPE_TOWER_UPGRADE;
+    currentFloatingMenuOpen.entityWrapper = (EntityWrapper){
+        .type = ENTITY_WRAPPER_TYPE_TOWER,
+        .id = tower->entityId,
+        .arrayIndex = ENTITY_INDEX(tower, towers),
+    };
+  }
 }
 
 bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
@@ -849,8 +905,8 @@ void drawTowerPlacementGhost(PlacementCtx ctx, Vector2 pos, bool canBePlaced) {
   assert(ctx.type == PLACEMENT_CTX_TYPE_TOWER);
 
   pos = (Vector2){
-      .x = ((int)(pos.x / TILE)) * TILE + TILE / 2.0f,
-      .y = ((int)(pos.y / TILE)) * TILE + TILE / 2.0f,
+      .x = ((int)(pos.x / TILE)) * TILE + HALF_TILE,
+      .y = ((int)(pos.y / TILE)) * TILE + HALF_TILE,
   };
   Color color = canBePlaced ? Fade(GREEN, 0.7f) : Fade(RED, 0.7f);
   drawTexture(towerTextures[ctx.tower.towerType], pos, TILE_AS_VECTOR2, 0, color);
@@ -881,7 +937,7 @@ void confirmTowerPlacement(PlacementCtx ctx, Vector2 pos) {
 
 void computeBuyTowerCommand(CommandCtx ctx) {
   TowerType towerType = ctx.buyTower.towerType;
-  currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
+  currentFloatingMenuOpen.type = FLOATING_MENU_TYPE_NONE;
 
   TowerStat towerStat = towerStats[towerType];
   if (player.gold < towerStat.cost) {
@@ -894,6 +950,40 @@ void computeBuyTowerCommand(CommandCtx ctx) {
   placement.validatePlacement = validateTowerPlacement;
   placement.confirmPlacement = confirmTowerPlacement;
   placement.drawPlacementGhost = drawTowerPlacementGhost;
+}
+
+void computeBuyTowerUpgradeCommand(CommandCtx ctx) {
+  Tower *tower = resolveEntity(ctx.buyTowerUpgrade.entityWrapper);
+  if (tower == NULL) {
+    TraceLog(LOG_ERROR, "could not resolve tower");
+    return;
+  }
+  TowerUpgradeType towerUpgradeType = ctx.buyTowerUpgrade.towerUpgradeType;
+
+  int cost = UPGRADE_TOWER_METADATA[towerUpgradeType].cost;
+  if (player.gold < cost) {
+    pushNotification(NOTIFICATION_TYPE_TOAST, "Insufficient Gold");
+    return;
+  }
+
+  player.gold -= cost;
+
+  float multiplier = UPGRADE_TOWER_METADATA[towerUpgradeType].addend;
+  switch (towerUpgradeType) {
+  case TOWER_UPGRADE_TYPE_RANGE:
+    tower->range += multiplier;
+    break;
+  case TOWER_UPGRADE_TYPE_FIRE_RATE:
+    tower->fireRate += multiplier;
+    break;
+  case TOWER_UPGRADE_TYPE_DAMAGE:
+    tower->damage += multiplier;
+    break;
+  case TOWER_UPGRADE_TYPE_COUNT:
+    break;
+  }
+
+  pushNotification(NOTIFICATION_TYPE_TOAST, "Tower Upgraded");
 }
 
 // ================================================== BULLET ==================================================
@@ -1011,9 +1101,9 @@ void computeFloatingMenuKeys() {
   }
 
   for (int i = 0; i < ARRAY_LEN(FLOATING_MENU_TRANSITIONS); i++) {
-    if (keyPressed == FLOATING_MENU_TRANSITIONS[i].key && currentFloatingMenuOpen == FLOATING_MENU_TRANSITIONS[i].from) {
+    if (keyPressed == FLOATING_MENU_TRANSITIONS[i].key && currentFloatingMenuOpen.type == FLOATING_MENU_TRANSITIONS[i].from) {
       placement.active = false;
-      currentFloatingMenuOpen = FLOATING_MENU_TRANSITIONS[i].to;
+      currentFloatingMenuOpen.type = FLOATING_MENU_TRANSITIONS[i].to;
       return;
     }
   }
@@ -1071,6 +1161,8 @@ Vector2 drawRawFloatingMenu(Vector2 sizeInTiles, char *headerText) {
 }
 
 void drawPauseFloatingMenu() {
+  assert(currentFloatingMenuOpen.type == FLOATING_MENU_TYPE_PAUSE);
+
   Vector2 size = {6, 3};
   drawRawFloatingMenu(size, "PAUSE");
   // TODO: improve
@@ -1096,28 +1188,37 @@ void drawBuyTowerWidgetDescription(TowerType towerType, Texture towerTexture, Ve
   }
 }
 
+Rectangle drawFloatingMenuButton(Rectangle rectangleWrapper, const char *label) {
+  Vector2 textSize = MeasureTextEx(font, label, font.baseSize, 1);
+
+  Vector2 size = (Vector2){
+      .x = textSize.x + 3 * FLOATING_MENU_ITEMS_PADDING,
+      .y = textSize.y + 3 * FLOATING_MENU_ITEMS_PADDING,
+  };
+
+  Rectangle rectangle = {
+      .x = rectangleWrapper.x + rectangleWrapper.width - size.x - FLOATING_MENU_ITEMS_PADDING,
+      .y = rectangleWrapper.y + rectangleWrapper.height - size.y - FLOATING_MENU_ITEMS_PADDING,
+      .width = size.x,
+      .height = size.y,
+  };
+
+  bool isMouseOver = CheckCollisionPointRec(GetMousePosition(), rectangle);
+  Texture texture = floatingMenuAssets[isMouseOver ? FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER : FLOATING_MENU_ASSET_BUTTON_DEFAULT];
+  NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(texture);
+  DrawTextureNPatch(texture, nPatchInfo, rectangle, VECTOR2_ZERO, 0, WHITE);
+
+  Vector2 textPos = {
+      .x = rectangle.x + rectangle.width / 2 - textSize.x / 2,
+      .y = rectangle.y + rectangle.height / 2 - textSize.y / 2,
+  };
+  DrawTextEx(font, label, textPos, font.baseSize, 1, WHITE);
+
+  return rectangle;
+}
+
 Rectangle drawBuyTowerWidgetBuyButton(Rectangle rectangleWrapper) {
-  Vector2 buttonSize = {80, 50};
-  Rectangle buttonRectangle = {
-      .x = rectangleWrapper.x + rectangleWrapper.width - buttonSize.x - FLOATING_MENU_ITEMS_PADDING,
-      .y = rectangleWrapper.y + rectangleWrapper.height - buttonSize.y - FLOATING_MENU_ITEMS_PADDING,
-      .width = buttonSize.x,
-      .height = buttonSize.y,
-  };
-
-  bool mouseOverButton = CheckCollisionPointRec(GetMousePosition(), buttonRectangle);
-  Texture buttonTexture = floatingMenuAssets[mouseOverButton ? FLOATING_MENU_ASSET_BUTTON_DEFAULT_HOVER : FLOATING_MENU_ASSET_BUTTON_DEFAULT];
-  NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(buttonTexture);
-  DrawTextureNPatch(buttonTexture, nPatchInfo, buttonRectangle, VECTOR2_ZERO, 0, WHITE);
-
-  Vector2 buttonTextSize = MeasureTextEx(font, BUTTON_LABEL_BUY, font.baseSize, 1);
-  Vector2 buttonTextPos = {
-      .x = buttonRectangle.x + buttonRectangle.width / 2 - buttonTextSize.x / 2,
-      .y = buttonRectangle.y + buttonRectangle.height / 2 - buttonTextSize.y / 2,
-  };
-  DrawTextEx(font, BUTTON_LABEL_BUY, buttonTextPos, font.baseSize, 1, WHITE);
-
-  return buttonRectangle;
+  return drawFloatingMenuButton(rectangleWrapper, BUTTON_LABEL_BUY);
 }
 
 Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
@@ -1136,7 +1237,7 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
 
   drawBuyTowerWidgetDescription(towerType, towerTexture, drawAt);
 
-  if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), buttonRectangle)) {
+  if (checkClickOn(buttonRectangle)) {
     CommandCtx commandCtx = (CommandCtx){.buyTower = {.towerType = towerType}};
     pushCommand(COMMAND_TYPE_BUY_TOWER, computeBuyTowerCommand, commandCtx);
   }
@@ -1145,6 +1246,8 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
 }
 
 void drawShoppingFloatingMenu() {
+  assert(currentFloatingMenuOpen.type == FLOATING_MENU_TYPE_SHOPPING);
+
   Vector2 size = {8, 11};
   Vector2 drawAt = drawRawFloatingMenu(size, "SHOPPING");
 
@@ -1153,8 +1256,77 @@ void drawShoppingFloatingMenu() {
   }
 }
 
+const char *buildTowerUpgradeItemText(TowerUpgradeType towerUpgradeType, Tower *tower) {
+  const char *text = TextFormat("%s\nCost: $%d", UPGRADE_TOWER_METADATA[towerUpgradeType].label, UPGRADE_TOWER_METADATA[towerUpgradeType].cost);
+
+  switch (towerUpgradeType) {
+  case TOWER_UPGRADE_TYPE_RANGE:
+    return TextFormat(text, tower->range, tower->range + UPGRADE_TOWER_METADATA[towerUpgradeType].addend);
+  case TOWER_UPGRADE_TYPE_FIRE_RATE:
+    return TextFormat(text, tower->fireRate, tower->fireRate + UPGRADE_TOWER_METADATA[towerUpgradeType].addend);
+  case TOWER_UPGRADE_TYPE_DAMAGE:
+    return TextFormat(text, tower->damage, tower->damage + UPGRADE_TOWER_METADATA[towerUpgradeType].addend);
+  case TOWER_UPGRADE_TYPE_COUNT:
+    break;
+  };
+
+  assert(false && "should be unreachable");
+}
+
+void drawTowerUpgradeFloatingMenu() {
+  assert(currentFloatingMenuOpen.type == FLOATING_MENU_TYPE_TOWER_UPGRADE);
+
+  Vector2 size = {8, 6};
+  Vector2 drawAt = drawRawFloatingMenu(size, "TOWER UPGRADE");
+
+  Tower *tower = resolveEntity(currentFloatingMenuOpen.entityWrapper);
+  if (tower == NULL) {
+    TraceLog(LOG_ERROR, "could not resolve tower");
+    return;
+  }
+
+  Texture2D texture = towerTextures[tower->type];
+  Vector2 texturePos = {
+      .x = drawAt.x + (size.x - 2) * HALF_TILE,
+      .y = drawAt.y + HALF_TILE,
+  };
+  drawTexture(texture, texturePos, TILE_AS_VECTOR2, 0, WHITE);
+  drawAt.y += TILE + FLOATING_MENU_ITEMS_PADDING * 2;
+
+  for (int i = 0; i < TOWER_UPGRADE_TYPE_COUNT; i++) {
+    const char *text = buildTowerUpgradeItemText(i, tower);
+
+    Vector2 textSize = MeasureTextEx(font, text, font.baseSize, 1);
+    Vector2 textPos = (Vector2){
+        .x = drawAt.x + FLOATING_MENU_ITEMS_PADDING,
+        .y = drawAt.y + FLOATING_MENU_ITEMS_PADDING,
+    };
+    DrawTextEx(font, text, textPos, font.baseSize, 1, MYBROWN_DARK);
+
+    Rectangle rectangleWrapper = (Rectangle){
+        .x = drawAt.x,
+        .y = drawAt.y,
+        .width = (size.x - 2) * TILE,
+        .height = textSize.y + 2 * FLOATING_MENU_ITEMS_PADDING,
+    };
+    DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
+
+    Rectangle buttonRectangle = drawFloatingMenuButton(rectangleWrapper, "UPGRADE");
+
+    if (checkClickOn(buttonRectangle)) {
+      CommandCtx commandCtx = (CommandCtx){.buyTowerUpgrade = {currentFloatingMenuOpen.entityWrapper, i}};
+      pushCommand(COMMAND_TYPE_BUY_TOWER_UPGRADE, computeBuyTowerUpgradeCommand, commandCtx);
+      currentFloatingMenuOpen.type = FLOATING_MENU_TYPE_NONE;
+    }
+
+    drawAt.y += rectangleWrapper.height + FLOATING_MENU_ITEMS_PADDING;
+  }
+}
+
 void drawFloatingMenu() {
-  switch (currentFloatingMenuOpen) {
+  switch (currentFloatingMenuOpen.type) {
+  case FLOATING_MENU_TYPE_NONE:
+    break;
   case FLOATING_MENU_TYPE_SHOPPING:
     drawShoppingFloatingMenu();
     break;
@@ -1163,7 +1335,8 @@ void drawFloatingMenu() {
     break;
   case FLOATING_MENU_TYPE_GAMEOVER:
     break;
-  case FLOATING_MENU_TYPE_NONE:
+  case FLOATING_MENU_TYPE_TOWER_UPGRADE:
+    drawTowerUpgradeFloatingMenu();
     break;
   }
 }
@@ -1235,6 +1408,12 @@ void unloadAssets() {
 
 // ================================================== MAIN ==================================================
 
+void resetMouseState() {
+  gameState.mouse.pos = GetMousePosition();
+  gameState.mouse.click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+  gameState.mouse.clickUsed = false;
+}
+
 void drawDebugGrid() {
   for (int col = 0; col <= GRID_COLS; col++) {
     int x = col * TILE;
@@ -1253,9 +1432,10 @@ void drawDebugGrid() {
 }
 
 void updateState() {
+  resetMouseState();
   computeFloatingMenuKeys();
 
-  if (currentFloatingMenuOpen == FLOATING_MENU_TYPE_PAUSE) {
+  if (currentFloatingMenuOpen.type == FLOATING_MENU_TYPE_PAUSE) {
     return;
   }
 
