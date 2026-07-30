@@ -221,10 +221,10 @@ struct {
 // ================================================== FLOATING MENU ==================================================
 
 typedef enum {
+  FLOATING_MENU_TYPE_NONE,
   FLOATING_MENU_TYPE_SHOPPING,
   FLOATING_MENU_TYPE_PAUSE,
   FLOATING_MENU_TYPE_GAMEOVER,
-  FLOATING_MENU_TYPE_NONE,
 } FloatingMenuType;
 FloatingMenuType currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
 
@@ -238,6 +238,18 @@ typedef enum {
   FLOATING_MENU_ASSET_COUNT,
 } FloatingMenuAsset;
 Texture2D floatingMenuAssets[FLOATING_MENU_ASSET_COUNT];
+
+static const struct {
+  int key;
+  FloatingMenuType from;
+  FloatingMenuType to;
+} FLOATING_MENU_TRANSITIONS[] = {
+    {KEY_TAB, FLOATING_MENU_TYPE_NONE, FLOATING_MENU_TYPE_SHOPPING},    //
+    {KEY_TAB, FLOATING_MENU_TYPE_SHOPPING, FLOATING_MENU_TYPE_NONE},    //
+    {KEY_ESCAPE, FLOATING_MENU_TYPE_NONE, FLOATING_MENU_TYPE_PAUSE},    //
+    {KEY_ESCAPE, FLOATING_MENU_TYPE_PAUSE, FLOATING_MENU_TYPE_NONE},    //
+    {KEY_ESCAPE, FLOATING_MENU_TYPE_SHOPPING, FLOATING_MENU_TYPE_NONE}, //
+};
 
 // ================================================== COMMANDS ==================================================
 
@@ -387,6 +399,13 @@ NPatchInfo buildNPatchInfoOnTexture(Texture texture) {
       .bottom = texture.height / 2,
       .layout = NPATCH_NINE_PATCH,
   };
+}
+
+void drawTexture(Texture2D texture, Vector2 pos, Vector2 size, float rotation, Color color) {
+  Rectangle source = {0, 0, texture.width, texture.height};
+  Rectangle dest = {pos.x, pos.y, size.x, size.y};
+  Vector2 origin = Vector2Scale(size, 0.5f);
+  DrawTexturePro(texture, source, dest, origin, rotation, color);
 }
 
 // ================================================== COMMANDS ==================================================
@@ -558,12 +577,8 @@ void buildPath() {
 }
 
 void drawOnTile(int row, int col, int textureIndex) {
-  Texture2D texture = sceneTextures[textureIndex];
-  Rectangle source = {0, 0, texture.width, texture.height};
   Vector2 pos = cellCenter(col, row);
-  Rectangle dest = {pos.x, pos.y, TILE, TILE};
-  Vector2 origin = Vector2Scale(TILE_AS_VECTOR2, 0.5f);
-  DrawTexturePro(texture, source, dest, origin, 0, RAYWHITE);
+  drawTexture(sceneTextures[textureIndex], pos, TILE_AS_VECTOR2, 0, WHITE);
 }
 
 bool isNotRoad(int row, int col) {
@@ -711,6 +726,11 @@ void computeSpawnEnemy(float dt) {
   }
 }
 
+void computeEnemyHit(Enemy *enemy) {
+  enemy->active = false;
+  player.lifePoints -= enemy->stats.damage;
+}
+
 void computeEnemiesMovement(float dt) {
   FOREACH_ACTIVE(enemy, enemies) {
     Vector2 target = path[enemy->targetIndex];
@@ -720,8 +740,7 @@ void computeEnemiesMovement(float dt) {
     }
 
     if (enemy->targetIndex == pathCount) {
-      enemy->active = false;
-      player.lifePoints -= enemy->stats.damage;
+      computeEnemyHit(enemy);
       continue;
     }
 
@@ -732,11 +751,7 @@ void computeEnemiesMovement(float dt) {
 }
 
 void drawEnemy(Enemy *enemy) {
-  Texture2D texture = enemyTextures[enemy->type];
-  Rectangle source = {0, 0, texture.width, texture.height};
-  Rectangle dest = {enemy->pos.x, enemy->pos.y, enemy->size.x, enemy->size.y};
-  Vector2 origin = Vector2Scale(enemy->size, 0.5f);
-  DrawTexturePro(texture, source, dest, origin, enemy->angle, RAYWHITE);
+  drawTexture(enemyTextures[enemy->type], enemy->pos, enemy->size, enemy->angle, WHITE);
 }
 
 // ================================================== TOWER ==================================================
@@ -798,11 +813,7 @@ void updateTowerState() {
 }
 
 void drawTower(Tower *tower) {
-  Texture2D texture = towerTextures[tower->type];
-  Rectangle source = {0, 0, texture.width, texture.height};
-  Rectangle dest = {tower->pos.x, tower->pos.y, tower->size.x, tower->size.y};
-  Vector2 origin = Vector2Scale(tower->size, 0.5f);
-  DrawTexturePro(texture, source, dest, origin, tower->angle, RAYWHITE);
+  drawTexture(towerTextures[tower->type], tower->pos, tower->size, tower->angle, WHITE);
 }
 
 bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
@@ -837,15 +848,12 @@ bool validateTowerPlacement(PlacementCtx ctx, Vector2 pos) {
 void drawTowerPlacementGhost(PlacementCtx ctx, Vector2 pos, bool canBePlaced) {
   assert(ctx.type == PLACEMENT_CTX_TYPE_TOWER);
 
-  int posX = ((int)(pos.x / TILE)) * TILE + TILE / 2.0f;
-  int posY = ((int)(pos.y / TILE)) * TILE + TILE / 2.0f;
-
-  Texture2D texture = towerTextures[ctx.tower.towerType];
-  Rectangle source = {0, 0, texture.width, texture.height};
-  Rectangle dest = {posX, posY, TILE, TILE};
-  Vector2 origin = Vector2Scale(TILE_AS_VECTOR2, 0.5f);
+  pos = (Vector2){
+      .x = ((int)(pos.x / TILE)) * TILE + TILE / 2.0f,
+      .y = ((int)(pos.y / TILE)) * TILE + TILE / 2.0f,
+  };
   Color color = canBePlaced ? Fade(GREEN, 0.7f) : Fade(RED, 0.7f);
-  DrawTexturePro(texture, source, dest, origin, 0, color);
+  drawTexture(towerTextures[ctx.tower.towerType], pos, TILE_AS_VECTOR2, 0, color);
 }
 
 void computePlaceTowerCommand(CommandCtx ctx) {
@@ -992,40 +1000,42 @@ void drawHud() {
 // ================================================== FLOATING MENU ==================================================
 
 void computeFloatingMenuKeys() {
-  if (IsKeyPressed(KEY_TAB) && currentFloatingMenuOpen == FLOATING_MENU_TYPE_NONE) {
-    TraceLog(LOG_DEBUG, "tab pressed");
-    placement.active = false;
-    currentFloatingMenuOpen = FLOATING_MENU_TYPE_SHOPPING;
+  int keyPressed = GetKeyPressed();
+  if (keyPressed == KEY_NULL) {
     return;
   }
 
-  if (IsKeyPressed(KEY_ESCAPE) && currentFloatingMenuOpen == FLOATING_MENU_TYPE_NONE && !placement.active) {
-    TraceLog(LOG_DEBUG, "esc pressed to pause");
+  if (keyPressed == KEY_ESCAPE && placement.active) {
     placement.active = false;
-    currentFloatingMenuOpen = FLOATING_MENU_TYPE_PAUSE;
     return;
   }
 
-  if (IsKeyPressed(KEY_ESCAPE)) {
-    TraceLog(LOG_DEBUG, "esc pressed to close opened floating menu");
-    placement.active = false;
-    currentFloatingMenuOpen = FLOATING_MENU_TYPE_NONE;
-    return;
+  for (int i = 0; i < ARRAY_LEN(FLOATING_MENU_TRANSITIONS); i++) {
+    if (keyPressed == FLOATING_MENU_TRANSITIONS[i].key && currentFloatingMenuOpen == FLOATING_MENU_TRANSITIONS[i].from) {
+      placement.active = false;
+      currentFloatingMenuOpen = FLOATING_MENU_TRANSITIONS[i].to;
+      return;
+    }
   }
 }
 
 void drawFloatingMenuHeaderStrip(Rectangle baseDest) {
   Texture centerTexture = floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_CENTER];
+  Texture leftTexture = floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_LEFT];
+  Texture rightTexture = floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_RIGHT];
+  assert(centerTexture.width == leftTexture.width && centerTexture.width == rightTexture.width);
+  assert(centerTexture.height == leftTexture.height && centerTexture.height == rightTexture.height);
+
   Vector2 floatingTileSize = {centerTexture.width, centerTexture.height};
 
   Vector2 origin = Vector2Scale(floatingTileSize, 0.5f);
   Rectangle source = {0, 0, floatingTileSize.x, floatingTileSize.y};
 
   Rectangle leftDest = {baseDest.x + 1.5 * TILE, baseDest.y, floatingTileSize.x, floatingTileSize.y};
-  DrawTexturePro(floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_LEFT], source, leftDest, origin, 0, RAYWHITE);
+  DrawTexturePro(leftTexture, source, leftDest, origin, 0, RAYWHITE);
 
   Rectangle rightDest = {baseDest.x + baseDest.width - 1.5 * TILE, baseDest.y, floatingTileSize.x, floatingTileSize.y};
-  DrawTexturePro(floatingMenuAssets[FLOATING_MENU_ASSET_HEADER_RIGHT], source, rightDest, origin, 0, RAYWHITE);
+  DrawTexturePro(rightTexture, source, rightDest, origin, 0, RAYWHITE);
 
   float cur = leftDest.x + leftDest.width;
   while (cur < rightDest.x) {
@@ -1295,7 +1305,7 @@ int main(void) {
   InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
 
   SetTargetFPS(60);
-  SetExitKey(KEY_Q);
+  SetExitKey(KEY_BACKSPACE);
 
   loadAssets();
 
