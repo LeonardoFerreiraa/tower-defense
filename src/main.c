@@ -24,7 +24,10 @@
 #define MYBROWN (Color){129, 89, 46, 255}
 #define MYBROWN_DARK (Color){77, 53, 28, 255}
 
-#define BUTTON_LABEL_BUY "Buy"
+#define BUTTON_LABEL_BUY "BUY"
+#define BUTTON_LABEL_UPGRADE "UPGRADE"
+#define SHOPPING_HEADER_LABEL "SHOPPING"
+#define TOWER_UPGRADE_HEADER_LABEL "TOWER UPGRADE"
 
 #define DEFAULT_UI_PADDING 10
 
@@ -54,6 +57,8 @@
     else
 
 #define ENTITY_INDEX(ptr, arr) ((int)((ptr) - (arr)))
+
+#define NEW_ENTITY(list) newEntity((list), ARRAY_LEN(list), sizeof((list)[0]))
 
 // ================================================== SHARED STATE ==================================================
 
@@ -409,8 +414,6 @@ unsigned int nextEntityId() {
   static unsigned int seq = 0;
   return ++seq;
 }
-
-#define NEW_ENTITY(list) newEntity((list), ARRAY_LEN(list), sizeof((list)[0]))
 
 void *newEntity(void *list, int count, size_t stride) {
   typedef struct {
@@ -1325,7 +1328,7 @@ void drawShoppingFloatingMenu() {
   assert(currentFloatingMenuOpen.type == FLOATING_MENU_TYPE_SHOPPING);
 
   Vector2 size = {8, 11};
-  Vector2 drawAt = drawRawFloatingMenu(size, "SHOPPING");
+  Vector2 drawAt = drawRawFloatingMenu(size, SHOPPING_HEADER_LABEL);
 
   for (int i = 0; i < TOWER_TYPE_COUNT; i++) {
     drawAt = drawBuyTowerWidget(i, size, drawAt);
@@ -1353,7 +1356,7 @@ void drawTowerUpgradeFloatingMenu() {
   assert(currentFloatingMenuOpen.type == FLOATING_MENU_TYPE_TOWER_UPGRADE);
 
   Vector2 size = {8, 6};
-  Vector2 drawAt = drawRawFloatingMenu(size, "TOWER UPGRADE");
+  Vector2 drawAt = drawRawFloatingMenu(size, TOWER_UPGRADE_HEADER_LABEL);
 
   Tower *tower = resolveEntity(currentFloatingMenuOpen.entityWrapper);
   if (tower == NULL) {
@@ -1387,7 +1390,7 @@ void drawTowerUpgradeFloatingMenu() {
     };
     DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
 
-    Rectangle buttonRectangle = drawFloatingMenuButton(rectangleWrapper, "UPGRADE");
+    Rectangle buttonRectangle = drawFloatingMenuButton(rectangleWrapper, BUTTON_LABEL_UPGRADE);
 
     if (checkClickOn(buttonRectangle)) {
       CommandCtx commandCtx = (CommandCtx){.buyTowerUpgrade = {currentFloatingMenuOpen.entityWrapper, i}};
