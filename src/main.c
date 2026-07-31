@@ -14,6 +14,7 @@
     TILE, TILE                                                                                                                                                 \
   }
 #define VECTOR2_ZERO (Vector2){0, 0}
+#define BUILD_PATH_MATRIX_MAX_ATTEMPT 50
 
 #define ENEMY_SPAWN_DELAY_IN_SECONDS 1
 #define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
@@ -25,8 +26,7 @@
 
 #define BUTTON_LABEL_BUY "Buy"
 
-#define FLOATING_MENU_ITEMS_PADDING 10
-#define NOTIFICATION_PADDING 10
+#define DEFAULT_UI_PADDING 10
 
 #define ARRAY_LEN(a) (int)(sizeof(a) / sizeof((a)[0]))
 
@@ -234,6 +234,8 @@ RenderTexture2D sceneBaked;
 
 // ================================================== PATH ==================================================
 
+static const int dCol[] = {0, 0, +1, -1};
+static const int dRow[] = {+1, -1, 0, 0};
 int pathMatrix[GRID_ROWS][GRID_COLS];
 Vector2 path[GRID_ROWS * GRID_COLS];
 int pathCount = 0;
@@ -499,17 +501,17 @@ void computeNotificationDuration(float dt) {
 }
 
 void drawNotificationLine(Notification *notification, Rectangle baseDest, Vector2 textPosition, Vector2 textSize) {
-  float start = baseDest.x + NOTIFICATION_PADDING;
-  float end = baseDest.x + baseDest.width - NOTIFICATION_PADDING;
+  float start = baseDest.x + DEFAULT_UI_PADDING;
+  float end = baseDest.x + baseDest.width - DEFAULT_UI_PADDING;
   float remaining = notification->duration / NOTIFICATION_DURATION;
 
   Vector2 startPos = (Vector2){
       end - ((end - start) * remaining),
-      textPosition.y + textSize.y + NOTIFICATION_PADDING,
+      textPosition.y + textSize.y + DEFAULT_UI_PADDING,
   };
   Vector2 endPos = (Vector2){
-      baseDest.x + baseDest.width - NOTIFICATION_PADDING,
-      textPosition.y + textSize.y + NOTIFICATION_PADDING,
+      baseDest.x + baseDest.width - DEFAULT_UI_PADDING,
+      textPosition.y + textSize.y + DEFAULT_UI_PADDING,
   };
   DrawLineEx(startPos, endPos, 3, MYBROWN_DARK);
 }
@@ -521,20 +523,20 @@ float drawNotification(Notification *notification, float drawAt) {
   NPatchInfo nPatchInfo = buildNPatchInfoOnTexture(texture);
 
   Vector2 size = (Vector2){
-      textSize.x + 2 * NOTIFICATION_PADDING,
-      textSize.y + 3 * NOTIFICATION_PADDING,
+      textSize.x + 2 * DEFAULT_UI_PADDING,
+      textSize.y + 3 * DEFAULT_UI_PADDING,
   };
   Rectangle baseDest = {
-      .x = GRID_COLS * TILE - size.x - NOTIFICATION_PADDING,
-      .y = drawAt + NOTIFICATION_PADDING,
+      .x = GRID_COLS * TILE - size.x - DEFAULT_UI_PADDING,
+      .y = drawAt + DEFAULT_UI_PADDING,
       .width = size.x,
       .height = size.y,
   };
   DrawTextureNPatch(texture, nPatchInfo, baseDest, VECTOR2_ZERO, 0, WHITE);
 
   Vector2 textPosition = (Vector2){
-      baseDest.x + NOTIFICATION_PADDING,
-      baseDest.y + NOTIFICATION_PADDING,
+      baseDest.x + DEFAULT_UI_PADDING,
+      baseDest.y + DEFAULT_UI_PADDING,
   };
   DrawTextEx(font, notification->message, textPosition, font.baseSize, 1, MYBROWN_DARK);
 
@@ -552,36 +554,110 @@ void drawNotifications() {
 
 // ================================================== SCENE ==================================================
 
-void buildPathMatrix() {
-  int fixed[GRID_ROWS][GRID_COLS] = {
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-      {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
-      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0}, //
-      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0}, //
-      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-      {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-      {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, //
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, //
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-  };
-
+void resetPathMatrix() {
   for (int row = 0; row < GRID_ROWS; row++) {
     for (int col = 0; col < GRID_COLS; col++) {
-      pathMatrix[row][col] = fixed[row][col];
+      pathMatrix[row][col] = 0;
     }
   }
 }
 
-void buildPath() {
-  int dCol[] = {0, 0, +1, -1};
-  int dRow[] = {+1, -1, 0, 0};
+int checkForNeighbors(int row, int col) {
+  int count = 0;
+  for (int i = 0; i < 4; i++) {
+    int nRow = row + dRow[i];
+    int nCol = col + dCol[i];
 
+    if (nCol < 0 || nCol >= GRID_COLS) {
+      continue;
+    }
+
+    if (nRow < 0 || nRow >= GRID_ROWS) {
+      continue;
+    }
+
+    if (pathMatrix[nRow][nCol]) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+void buildPathMatrix() {
+  typedef struct {
+    int row;
+    int col;
+  } Pos;
+
+  static const Pos startPos = (Pos){2, 0};
+  static const Pos firstPathPos = (Pos){2, 1};
+
+  static const Pos endPos = (Pos){GRID_ROWS - 3, GRID_COLS - 1};
+
+  static const Pos hTargets[] = {
+      {3, 16},
+      {8, 9},
+  };
+  static const Pos vTargets[] = {
+      {11, 2},
+      {4, 12},
+  };
+  static_assert(ARRAY_LEN(hTargets) == ARRAY_LEN(vTargets));
+
+  Pos targets[ARRAY_LEN(hTargets) + 1];
+  for (int i = 0; i < ARRAY_LEN(targets) - 1; i++) {
+    targets[i] = gameState.wave % 2 == 0 ? vTargets[i] : hTargets[i];
+  }
+
+  targets[ARRAY_LEN(targets) - 1] = (Pos){GRID_ROWS - 3, GRID_COLS - 2};
+
+  resetPathMatrix();
+
+  pathMatrix[startPos.row][startPos.col] = 1;
+  pathMatrix[firstPathPos.row][firstPathPos.col] = 1;
+
+  Pos curPos = (Pos){firstPathPos.row, firstPathPos.col};
+
+  int attempts = BUILD_PATH_MATRIX_MAX_ATTEMPT;
+  int targetIndex = 0;
+  Pos target = targets[targetIndex++];
+
+  do {
+    int direction = GetRandomValue(0, 3);
+    Pos nextPos = (Pos){curPos.row + dRow[direction], curPos.col + dCol[direction]};
+
+    int neighborsCount = checkForNeighbors(nextPos.row, nextPos.col);
+
+    if (nextPos.row <= firstPathPos.row || nextPos.row >= GRID_ROWS - 2 || nextPos.col < 0 || nextPos.col >= GRID_COLS || neighborsCount > 1) {
+      attempts--;
+      continue;
+    }
+
+    curPos = nextPos;
+    pathMatrix[curPos.row][curPos.col] = 1;
+    attempts = BUILD_PATH_MATRIX_MAX_ATTEMPT;
+
+    if (curPos.row == target.row && curPos.col == target.col) {
+      if (targetIndex >= ARRAY_LEN(targets)) {
+        break;
+      } else {
+        target = targets[targetIndex++];
+        if (pathMatrix[target.row][target.col]) {
+          attempts = -1;
+        }
+      }
+    }
+  } while (attempts > 0);
+
+  if (attempts <= 0 || pathMatrix[endPos.row][endPos.col] || checkForNeighbors(endPos.row, endPos.col) > 1) {
+    buildPathMatrix();
+  } else {
+    pathMatrix[endPos.row][endPos.col] = 1;
+  }
+}
+
+void buildPath() {
   int prevCol = -1, prevRow = -1;
   int col = 0, row = 2;
 
@@ -1177,14 +1253,14 @@ void drawBuyTowerWidgetDescription(TowerType towerType, Texture towerTexture, Ve
       TextFormat("Damage: %0.2f", towerStat.damage),
   };
   Vector2 textPos = {
-      .x = drawAt.x + towerTexture.width + FLOATING_MENU_ITEMS_PADDING,
-      .y = drawAt.y + FLOATING_MENU_ITEMS_PADDING * 1.5,
+      .x = drawAt.x + towerTexture.width + DEFAULT_UI_PADDING,
+      .y = drawAt.y + DEFAULT_UI_PADDING * 1.5,
   };
   for (int i = 0; i < ARRAY_LEN(lines); i++) {
     const char *msg = lines[i];
     Vector2 size = MeasureTextEx(font, msg, font.baseSize, 1);
     DrawTextEx(font, msg, textPos, font.baseSize, 1, MYBROWN_DARK);
-    textPos.y += size.y + FLOATING_MENU_ITEMS_PADDING;
+    textPos.y += size.y + DEFAULT_UI_PADDING;
   }
 }
 
@@ -1192,13 +1268,13 @@ Rectangle drawFloatingMenuButton(Rectangle rectangleWrapper, const char *label) 
   Vector2 textSize = MeasureTextEx(font, label, font.baseSize, 1);
 
   Vector2 size = (Vector2){
-      .x = textSize.x + 3 * FLOATING_MENU_ITEMS_PADDING,
-      .y = textSize.y + 3 * FLOATING_MENU_ITEMS_PADDING,
+      .x = textSize.x + 3 * DEFAULT_UI_PADDING,
+      .y = textSize.y + 3 * DEFAULT_UI_PADDING,
   };
 
   Rectangle rectangle = {
-      .x = rectangleWrapper.x + rectangleWrapper.width - size.x - FLOATING_MENU_ITEMS_PADDING,
-      .y = rectangleWrapper.y + rectangleWrapper.height - size.y - FLOATING_MENU_ITEMS_PADDING,
+      .x = rectangleWrapper.x + rectangleWrapper.width - size.x - DEFAULT_UI_PADDING,
+      .y = rectangleWrapper.y + rectangleWrapper.height - size.y - DEFAULT_UI_PADDING,
       .width = size.x,
       .height = size.y,
   };
@@ -1242,7 +1318,7 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
     pushCommand(COMMAND_TYPE_BUY_TOWER, computeBuyTowerCommand, commandCtx);
   }
 
-  return (Vector2){.x = drawAt.x, .y = drawAt.y + towerTexture.height + FLOATING_MENU_ITEMS_PADDING};
+  return (Vector2){.x = drawAt.x, .y = drawAt.y + towerTexture.height + DEFAULT_UI_PADDING};
 }
 
 void drawShoppingFloatingMenu() {
@@ -1291,15 +1367,15 @@ void drawTowerUpgradeFloatingMenu() {
       .y = drawAt.y + HALF_TILE,
   };
   drawTexture(texture, texturePos, TILE_AS_VECTOR2, 0, WHITE);
-  drawAt.y += TILE + FLOATING_MENU_ITEMS_PADDING * 2;
+  drawAt.y += TILE + DEFAULT_UI_PADDING * 2;
 
   for (int i = 0; i < TOWER_UPGRADE_TYPE_COUNT; i++) {
     const char *text = buildTowerUpgradeItemText(i, tower);
 
     Vector2 textSize = MeasureTextEx(font, text, font.baseSize, 1);
     Vector2 textPos = (Vector2){
-        .x = drawAt.x + FLOATING_MENU_ITEMS_PADDING,
-        .y = drawAt.y + FLOATING_MENU_ITEMS_PADDING,
+        .x = drawAt.x + DEFAULT_UI_PADDING,
+        .y = drawAt.y + DEFAULT_UI_PADDING,
     };
     DrawTextEx(font, text, textPos, font.baseSize, 1, MYBROWN_DARK);
 
@@ -1307,7 +1383,7 @@ void drawTowerUpgradeFloatingMenu() {
         .x = drawAt.x,
         .y = drawAt.y,
         .width = (size.x - 2) * TILE,
-        .height = textSize.y + 2 * FLOATING_MENU_ITEMS_PADDING,
+        .height = textSize.y + 2 * DEFAULT_UI_PADDING,
     };
     DrawRectangleRoundedLinesEx(rectangleWrapper, 0.1, 1, 2, MYBROWN);
 
@@ -1319,7 +1395,7 @@ void drawTowerUpgradeFloatingMenu() {
       currentFloatingMenuOpen.type = FLOATING_MENU_TYPE_NONE;
     }
 
-    drawAt.y += rectangleWrapper.height + FLOATING_MENU_ITEMS_PADDING;
+    drawAt.y += rectangleWrapper.height + DEFAULT_UI_PADDING;
   }
 }
 
@@ -1429,6 +1505,12 @@ void drawDebugGrid() {
       DrawCircleLinesV(tower.pos, tower.range, LIGHTGRAY);
     }
   }
+
+  Vector2 size = (Vector2){30, 15};
+  Vector2 mousePos = GetMousePosition();
+  DrawRectangle(mousePos.x - size.x, mousePos.y - size.y, size.x, size.y, RED);
+  const char *msg = TextFormat("(%d, %d)", (int)gameState.mouse.pos.y / TILE, (int)gameState.mouse.pos.x / TILE);
+  DrawText(msg, mousePos.x - size.x + 2, mousePos.y - size.y + 2, 10, WHITE);
 }
 
 void updateState() {
@@ -1476,13 +1558,13 @@ int main(void) {
 
   unsigned int seed = (unsigned int)time(NULL);
 #ifdef DEBUG_ENABLED
-  seed = 123456;
+  seed = 1234567890;
 #endif
 
   TraceLog(LOG_INFO, "seed: %u", seed);
-  SetRandomSeed(seed);
 
   InitWindow(TILE * GRID_COLS, TILE * GRID_ROWS, "tower defense");
+  SetRandomSeed(seed);
 
   SetTargetFPS(60);
   SetExitKey(KEY_BACKSPACE);
