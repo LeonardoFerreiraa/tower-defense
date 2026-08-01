@@ -18,8 +18,9 @@
 
 #define ENEMY_SPAWN_DELAY_IN_SECONDS 1
 #define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
-#define ENEMY_PER_WAVE 5
+#define ENEMY_PER_WAVE 2
 #define NOTIFICATION_DURATION 5.0f
+#define WAVES_PER_LEVEL 10
 
 #define MYBROWN (Color){129, 89, 46, 255}
 #define MYBROWN_DARK (Color){77, 53, 28, 255}
@@ -63,26 +64,32 @@
 // ================================================== SHARED STATE ==================================================
 
 struct {
+
   float speed;
-  int wave;
-  float enemySpawnTimer;
-  float nextWaveSpawnTimer;
-  bool waitingNextWave;
-  int level;
-  union {
-    struct {
-      Vector2 pos;
-      bool click;
-      bool clickUsed;
-    } mouse;
-  };
-} gameState = {
-    .speed = 200.0f,
-    .wave = 1,
-    .enemySpawnTimer = 0,
-    .nextWaveSpawnTimer = -1,
-    .waitingNextWave = false,
-};
+
+  struct {
+    float timer;
+    int count;
+  } enemy;
+
+  struct {
+    int number;
+    float timer;
+    bool waitingNext;
+  } level;
+
+  struct {
+    Vector2 pos;
+    bool click;
+    bool clickUsed;
+  } mouse;
+
+  struct {
+    int number;
+    float timer;
+    bool waitingNext;
+  } wave;
+} gameState = {.speed = 200.0f};
 
 // ================================================== ENTITY_WRAPPER ==================================================
 
@@ -140,7 +147,6 @@ typedef struct {
 } Enemy;
 
 Enemy enemies[64];
-int enemyCount = 0;
 
 // ================================================== TOWER ==================================================
 
@@ -209,6 +215,7 @@ typedef struct {
   float size;
   Color color;
   EntityWrapper target;
+  EntityWrapper tower;
 } Bullet;
 Bullet bullets[128];
 
@@ -610,7 +617,7 @@ void buildPathMatrix() {
 
   Pos targets[ARRAY_LEN(hTargets) + 1];
   for (int i = 0; i < ARRAY_LEN(targets) - 1; i++) {
-    targets[i] = gameState.wave % 2 == 0 ? vTargets[i] : hTargets[i];
+    targets[i] = gameState.wave.number % 2 == 0 ? vTargets[i] : hTargets[i];
   }
 
   targets[ARRAY_LEN(targets) - 1] = (Pos){GRID_ROWS - 3, GRID_COLS - 2};
@@ -773,7 +780,11 @@ void drawBakedScene() {
 }
 
 void nextLevel() {
-  gameState.level++;
+  gameState.wave.number = 1;
+  gameState.wave.waitingNext = true;
+  gameState.wave.timer = -1;
+
+  gameState.level.number++;
   buildPathMatrix();
   buildPath();
   bakeScene();
@@ -786,21 +797,23 @@ bool waveEnded() {
   return true;
 }
 
-void computeSpawnWave(float dt) {
-  if (gameState.nextWaveSpawnTimer >= 0) {
-    gameState.nextWaveSpawnTimer += dt;
-    if (gameState.nextWaveSpawnTimer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
-      gameState.nextWaveSpawnTimer = -1;
-      gameState.wave++;
-      gameState.waitingNextWave = false;
-      enemyCount = 0;
-    }
+void computeWaveState(float dt) {
+  if (gameState.enemy.count > (ENEMY_PER_WAVE * gameState.wave.number)) {
+    gameState.wave.waitingNext = true;
   }
-}
 
-void computeWaveState() {
-  if (gameState.waitingNextWave && waveEnded() && gameState.nextWaveSpawnTimer < 0) {
-    gameState.nextWaveSpawnTimer = 0;
+  if (gameState.wave.waitingNext && waveEnded() && gameState.wave.timer < 0) {
+    gameState.wave.timer = 0;
+  }
+
+  if (gameState.wave.timer >= 0) {
+    gameState.wave.timer += dt;
+    if (gameState.wave.timer >= NEXT_WAVE_SPAWN_DELAY_IN_SECONDS) {
+      gameState.wave.timer = -1;
+      gameState.wave.number++;
+      gameState.wave.waitingNext = false;
+      gameState.enemy.count = 0;
+    }
   }
 }
 
@@ -808,11 +821,11 @@ void computeWaveState() {
 
 EnemyStat computeEnemyStats(EnemyType enemyType) {
   EnemyStat defaultStats = enemyStats[enemyType];
-  if (gameState.wave < 5) {
+  if (gameState.wave.number < 5) {
     return defaultStats;
   }
 
-  float multiplier = MATH_MAX(gameState.wave / 5.0f, 1.0f);
+  float multiplier = MATH_MAX(gameState.wave.number / 5.0f, 1.0f);
   return (EnemyStat){
       .healthPoints = defaultStats.healthPoints * multiplier,
       .speedMultiplier = defaultStats.speedMultiplier,
@@ -822,10 +835,6 @@ EnemyStat computeEnemyStats(EnemyType enemyType) {
 }
 
 void spawnEnemy() {
-  if (gameState.waitingNextWave) {
-    return;
-  }
-
   Enemy *enemy = NEW_ENTITY(enemies);
   if (enemy == NULL) {
     return;
@@ -837,16 +846,17 @@ void spawnEnemy() {
   enemy->color = RED;
   enemy->targetIndex = 1;
   enemy->stats = computeEnemyStats(enemy->type);
-
-  if (++enemyCount > (ENEMY_PER_WAVE * gameState.wave)) {
-    gameState.waitingNextWave = true;
-  }
+  gameState.enemy.count++;
 }
 
 void computeSpawnEnemy(float dt) {
-  gameState.enemySpawnTimer += dt;
-  if (gameState.enemySpawnTimer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
-    gameState.enemySpawnTimer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
+  if (gameState.wave.waitingNext) {
+    return;
+  }
+
+  gameState.enemy.timer += dt;
+  if (gameState.enemy.timer >= ENEMY_SPAWN_DELAY_IN_SECONDS) {
+    gameState.enemy.timer -= ENEMY_SPAWN_DELAY_IN_SECONDS;
     spawnEnemy();
   }
 }
@@ -882,14 +892,29 @@ void drawEnemy(Enemy *enemy) {
 // ================================================== TOWER ==================================================
 
 bool retrieveTowerTarget(Tower *tower, EntityWrapper *out) {
+  struct {
+    float distance;
+    Enemy *enemy;
+    bool found;
+  } closest = {
+      .distance = tower->range * 2,
+      .found = false,
+  };
+
   FOREACH_ACTIVE(enemy, enemies) {
     float distance = Vector2Distance(tower->pos, enemy->pos);
-    if (distance < tower->range) {
-      out->type = ENTITY_WRAPPER_TYPE_ENEMY;
-      out->id = enemy->entityId;
-      out->arrayIndex = ENTITY_INDEX(enemy, enemies);
-      return true;
+    if (distance < tower->range && distance < closest.distance) {
+      closest.distance = distance;
+      closest.enemy = enemy;
+      closest.found = true;
     }
+  }
+
+  if (closest.found) {
+    out->type = ENTITY_WRAPPER_TYPE_ENEMY;
+    out->id = closest.enemy->entityId;
+    out->arrayIndex = ENTITY_INDEX(closest.enemy, enemies);
+    return true;
   }
 
   return false;
@@ -931,10 +956,6 @@ void computeTowerAngle() {
     Vector2 dir = Vector2Subtract(enemy->pos, tower->pos);
     tower->angle = (atan2f(dir.y, dir.x) * RAD2DEG) + 90;
   }
-}
-
-void updateTowerState() {
-  computeTowerAngle();
 }
 
 void drawTower(Tower *tower) {
@@ -1031,15 +1052,39 @@ void computeBuyTowerCommand(CommandCtx ctx) {
   placement.drawPlacementGhost = drawTowerPlacementGhost;
 }
 
+int calcTowerUpgradeCost(TowerUpgradeType towerUpgradeType, Tower *tower) {
+  int updates = -1;
+  switch (towerUpgradeType) {
+  case TOWER_UPGRADE_TYPE_RANGE:
+    updates = tower->range - towerStats[tower->type].range;
+    break;
+  case TOWER_UPGRADE_TYPE_FIRE_RATE:
+    updates = tower->fireRate - towerStats[tower->type].fireRate;
+    break;
+  case TOWER_UPGRADE_TYPE_DAMAGE:
+    updates = tower->damage - towerStats[tower->type].damage;
+    break;
+  case TOWER_UPGRADE_TYPE_COUNT:
+    break;
+  }
+
+  assert(updates >= 0);
+
+  updates = updates / UPGRADE_TOWER_METADATA[towerUpgradeType].addend + 1;
+
+  return UPGRADE_TOWER_METADATA[towerUpgradeType].cost * updates;
+}
+
 void computeBuyTowerUpgradeCommand(CommandCtx ctx) {
   Tower *tower = resolveEntity(ctx.buyTowerUpgrade.entityWrapper);
   if (tower == NULL) {
     TraceLog(LOG_ERROR, "could not resolve tower");
     return;
   }
+
   TowerUpgradeType towerUpgradeType = ctx.buyTowerUpgrade.towerUpgradeType;
 
-  int cost = UPGRADE_TOWER_METADATA[towerUpgradeType].cost;
+  int cost = calcTowerUpgradeCost(towerUpgradeType, tower);
   if (player.gold < cost) {
     pushNotification(NOTIFICATION_TYPE_TOAST, "Insufficient Gold");
     return;
@@ -1077,6 +1122,11 @@ void spawnBullet(Tower *tower, EntityWrapper target) {
   bullet->size = 5.0f;
   bullet->color = BLACK;
   bullet->target = target;
+  bullet->tower = (EntityWrapper){
+      .type = ENTITY_WRAPPER_TYPE_TOWER,
+      .id = tower->entityId,
+      .arrayIndex = ENTITY_INDEX(tower, towers),
+  };
 }
 
 void computeSpawnBullet(float dt) {
@@ -1098,13 +1148,15 @@ void computeSpawnBullet(float dt) {
 
 void computeBulletHit(Bullet *bullet) {
   Enemy *enemy = resolveEntity(bullet->target);
-  if (enemy == NULL) {
+  Tower *tower = resolveEntity(bullet->tower);
+
+  if (enemy == NULL || tower == NULL) {
     bullet->active = false;
     return;
   }
 
   bullet->active = false;
-  enemy->stats.healthPoints -= 10;
+  enemy->stats.healthPoints -= tower->damage;
 
   if (enemy->stats.healthPoints <= 0) {
     enemy->active = false;
@@ -1151,14 +1203,14 @@ void drawHud() {
 
   float x = 10;
   x = drawStat(x, TextFormat("Life: %d", player.lifePoints));
-  x = drawStat(x, TextFormat("Wave: %d", gameState.wave));
+  x = drawStat(x, TextFormat("Wave: %d", gameState.wave.number));
   x = drawStat(x, TextFormat("Gold: %d", player.gold));
   if (waveEnded()) {
-    if (gameState.nextWaveSpawnTimer > 0) {
-      x = drawStat(x, TextFormat("Next Wave In: %.0f", (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - gameState.nextWaveSpawnTimer)));
+    if (gameState.wave.timer > 0) {
+      x = drawStat(x, TextFormat("Next Wave In: %.0f", (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - gameState.wave.timer)));
     }
   } else {
-    int remainingEnemies = ENEMY_PER_WAVE * gameState.wave - enemyCount + 1;
+    int remainingEnemies = ENEMY_PER_WAVE * gameState.wave.number - gameState.enemy.count + 1;
     x = drawStat(x, TextFormat("Remaining Enemies To Spawn: %d", remainingEnemies));
   }
 
@@ -1336,7 +1388,8 @@ void drawShoppingFloatingMenu() {
 }
 
 const char *buildTowerUpgradeItemText(TowerUpgradeType towerUpgradeType, Tower *tower) {
-  const char *text = TextFormat("%s\nCost: $%d", UPGRADE_TOWER_METADATA[towerUpgradeType].label, UPGRADE_TOWER_METADATA[towerUpgradeType].cost);
+  int cost = calcTowerUpgradeCost(towerUpgradeType, tower);
+  const char *text = TextFormat("%s\nCost: $%d", UPGRADE_TOWER_METADATA[towerUpgradeType].label, cost);
 
   switch (towerUpgradeType) {
   case TOWER_UPGRADE_TYPE_RANGE:
@@ -1487,7 +1540,7 @@ void unloadAssets() {
 
 // ================================================== MAIN ==================================================
 
-void resetMouseState() {
+void computeMouseState() {
   gameState.mouse.pos = GetMousePosition();
   gameState.mouse.click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
   gameState.mouse.clickUsed = false;
@@ -1509,15 +1562,21 @@ void drawDebugGrid() {
     }
   }
 
-  Vector2 size = (Vector2){30, 15};
-  Vector2 mousePos = GetMousePosition();
-  DrawRectangle(mousePos.x - size.x, mousePos.y - size.y, size.x, size.y, RED);
+  int fontSize = GetFontDefault().baseSize;
   const char *msg = TextFormat("(%d, %d)", (int)gameState.mouse.pos.y / TILE, (int)gameState.mouse.pos.x / TILE);
-  DrawText(msg, mousePos.x - size.x + 2, mousePos.y - size.y + 2, 10, WHITE);
+  Vector2 textSize = MeasureTextEx(GetFontDefault(), msg, fontSize, 1);
+  Vector2 size = (Vector2){textSize.x + 1 * DEFAULT_UI_PADDING, textSize.y + 1 * DEFAULT_UI_PADDING};
+  Vector2 mousePos = GetMousePosition();
+  Vector2 pos = (Vector2){
+      .x = mousePos.x - size.x,
+      .y = mousePos.y - size.y,
+  };
+  DrawRectangle(pos.x, pos.y, size.x, size.y, RED);
+  DrawText(msg, pos.x + DEFAULT_UI_PADDING / 2.0f, pos.y + DEFAULT_UI_PADDING / 2.0f, fontSize, WHITE);
 }
 
 void updateState() {
-  resetMouseState();
+  computeMouseState();
   computeFloatingMenuKeys();
 
   if (currentFloatingMenuOpen.type == FLOATING_MENU_TYPE_PAUSE) {
@@ -1528,12 +1587,11 @@ void updateState() {
 
   computeCommands();
   computeSpawnEnemy(dt);
-  computeSpawnWave(dt);
+  computeWaveState(dt);
   computeBullet(dt);
 
   computeEnemiesMovement(dt);
-  updateTowerState();
-  computeWaveState();
+  computeTowerAngle();
   computeNotificationDuration(dt);
 }
 
@@ -1575,7 +1633,7 @@ int main(void) {
   loadAssets();
 
   while (!WindowShouldClose()) {
-    if (gameState.level == 0) {
+    if (gameState.level.number == 0) {
       nextLevel();
     }
 

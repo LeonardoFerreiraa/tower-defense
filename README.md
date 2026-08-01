@@ -12,9 +12,10 @@ recreational programming
 
 - [x] tower shop
 - [x] tower upgrade
-- [ ] game over / restart
+- [x] seed based pathMatrix/path
+- [ ] next level
 - [ ] boss on wave % 5
-- [ ] seed based pathMatrix/path
+- [ ] game over / restart
 - [ ] starting menu
     - [ ] seed input
 - [ ] pause menu
