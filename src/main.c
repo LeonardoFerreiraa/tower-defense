@@ -109,6 +109,12 @@ typedef struct {
 
 // ================================================== ENEMY ==================================================
 
+#define ENEMY_STATS_SHARED_ATTRIBUTES                                                                                                                          \
+  int health;                                                                                                                                                  \
+  float speedMultiplier;                                                                                                                                       \
+  int gold;                                                                                                                                                    \
+  int damage
+
 typedef enum {
   ENEMY_TYPE_NORMAL,
   ENEMY_TYPE_RUNNER,
@@ -118,17 +124,15 @@ typedef enum {
 } EnemyType;
 
 typedef struct {
-  int healthPoints;
-  float speedMultiplier;
-  int gold;
-  int damage;
+  ENEMY_STATS_SHARED_ATTRIBUTES;
+  float sizeMultiplier;
 } EnemyStat;
 
 EnemyStat enemyStats[] = {
-    [ENEMY_TYPE_NORMAL] = {100, 1, 20, 10},
-    [ENEMY_TYPE_RUNNER] = {50, 1.5, 20, 10},
-    [ENEMY_TYPE_TANK] = {200, 0.5, 20, 10},
-    [ENEMY_TYPE_BOSS] = {100, 1, 20, 10},
+    [ENEMY_TYPE_NORMAL] = {100, 1, 20, 10, 0.8f},
+    [ENEMY_TYPE_RUNNER] = {50, 1.5, 20, 10, 0.7f},
+    [ENEMY_TYPE_TANK] = {200, 0.5, 20, 10, 1.0f},
+    [ENEMY_TYPE_BOSS] = {100, 1, 20, 10, 1.0f},
 };
 static_assert(ARRAY_LEN(enemyStats) == ENEMY_TYPE_COUNT);
 
@@ -142,11 +146,12 @@ typedef struct {
   EnemyType type;
   float angle;
 
-  // TODO talvez shared attributes igual tower?
-  EnemyStat stats;
+  ENEMY_STATS_SHARED_ATTRIBUTES;
 } Enemy;
 
 Enemy enemies[64];
+
+#undef ENEMY_STATS_SHARED_ATTRIBUTES
 
 // ================================================== TOWER ==================================================
 
@@ -819,33 +824,26 @@ void computeWaveState(float dt) {
 
 // ================================================== ENEMY ==================================================
 
-EnemyStat computeEnemyStats(EnemyType enemyType) {
-  EnemyStat defaultStats = enemyStats[enemyType];
-  if (gameState.wave.number < 5) {
-    return defaultStats;
-  }
-
-  float multiplier = MATH_MAX(gameState.wave.number / 5.0f, 1.0f);
-  return (EnemyStat){
-      .healthPoints = defaultStats.healthPoints * multiplier,
-      .speedMultiplier = defaultStats.speedMultiplier,
-      .gold = defaultStats.gold,
-      .damage = defaultStats.damage * multiplier,
-  };
-}
-
 void spawnEnemy() {
   Enemy *enemy = NEW_ENTITY(enemies);
   if (enemy == NULL) {
     return;
   }
 
-  enemy->type = GetRandomValue(0, ENEMY_TYPE_COUNT - 2);
+  EnemyType enemyType = GetRandomValue(0, ENEMY_TYPE_COUNT - 2);
+  EnemyStat defaultStats = enemyStats[enemyType];
+  float statMultiplier = MATH_MAX(gameState.wave.number / 5.0f, 1.0f);
+
+  enemy->type = enemyType;
   enemy->pos = path[0];
-  enemy->size = Vector2Scale(TILE_AS_VECTOR2, 0.8f);
-  enemy->color = RED;
   enemy->targetIndex = 1;
-  enemy->stats = computeEnemyStats(enemy->type);
+  enemy->size = Vector2Scale(TILE_AS_VECTOR2, defaultStats.sizeMultiplier);
+  enemy->color = RED;
+  enemy->health = defaultStats.health * statMultiplier;
+  enemy->speedMultiplier = defaultStats.speedMultiplier;
+  enemy->gold = defaultStats.gold;
+  enemy->damage = defaultStats.damage * statMultiplier;
+
   gameState.enemy.count++;
 }
 
@@ -863,13 +861,13 @@ void computeSpawnEnemy(float dt) {
 
 void computeEnemyHit(Enemy *enemy) {
   enemy->active = false;
-  player.lifePoints -= enemy->stats.damage;
+  player.lifePoints -= enemy->damage;
 }
 
 void computeEnemiesMovement(float dt) {
   FOREACH_ACTIVE(enemy, enemies) {
     Vector2 target = path[enemy->targetIndex];
-    enemy->pos = Vector2MoveTowards(enemy->pos, target, (gameState.speed * enemy->stats.speedMultiplier) * dt);
+    enemy->pos = Vector2MoveTowards(enemy->pos, target, (gameState.speed * enemy->speedMultiplier) * dt);
     if (Vector2Equals(enemy->pos, target)) {
       enemy->targetIndex++;
     }
@@ -1156,11 +1154,11 @@ void computeBulletHit(Bullet *bullet) {
   }
 
   bullet->active = false;
-  enemy->stats.healthPoints -= tower->damage;
+  enemy->health -= tower->damage;
 
-  if (enemy->stats.healthPoints <= 0) {
+  if (enemy->health <= 0) {
     enemy->active = false;
-    player.gold += enemy->stats.gold;
+    player.gold += enemy->gold;
   }
 }
 
