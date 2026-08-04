@@ -11,7 +11,9 @@ recreational programming
 # Roadmap
 
 - [x] tower shop
-- [x] tower upgrade [x] seed based pathMatrix/path [ ] next level
+- [x] tower upgrade
+- [x] seed based pathMatrix/path
+- [x] next level
 - [ ] boss on wave % 5
 - [ ] game over / restart
 - [ ] starting menu
