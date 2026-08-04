@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "raylib.h"
-#include "raymath.h"
+#include <raylib.h>
+#include <raymath.h>
 
 #define TILE 80
 #define HALF_TILE TILE / 2.0f
@@ -18,12 +18,17 @@
 
 #define ENEMY_SPAWN_DELAY_IN_SECONDS 1
 #define NEXT_WAVE_SPAWN_DELAY_IN_SECONDS 5
-#define ENEMY_PER_WAVE 2
+#define ENEMIES_PER_WAVE 0
 #define NOTIFICATION_DURATION 5.0f
-#define WAVES_PER_LEVEL 10
+#define WAVES_PER_LEVEL 3
+#define NEXT_LEVEL_TRANSITION_TIMER 5.0f
+#define HALF_NEXT_LEVEL_TRANSITION_TIMER (NEXT_LEVEL_TRANSITION_TIMER / 2.0f)
+#define INITIAL_LIFE_POINTS 1000
+#define INITIAL_GOLD 300
 
 #define MYBROWN (Color){129, 89, 46, 255}
 #define MYBROWN_DARK (Color){77, 53, 28, 255}
+#define GRASS_GREEN (Color){46, 204, 113, 255}
 
 #define BUTTON_LABEL_BUY "BUY"
 #define BUTTON_LABEL_UPGRADE "UPGRADE"
@@ -64,7 +69,6 @@
 // ================================================== SHARED STATE ==================================================
 
 struct {
-
   float speed;
 
   struct {
@@ -76,6 +80,7 @@ struct {
     int number;
     float timer;
     bool waitingNext;
+    bool sceneLoaded;
   } level;
 
   struct {
@@ -89,7 +94,7 @@ struct {
     float timer;
     bool waitingNext;
   } wave;
-} gameState = {.speed = 200.0f};
+} gameState = {.speed = 100.0f};
 
 // ================================================== ENTITY_WRAPPER ==================================================
 
@@ -141,7 +146,6 @@ typedef struct {
 
   Vector2 pos;
   Vector2 size;
-  Color color;
   int targetIndex;
   EnemyType type;
   float angle;
@@ -263,8 +267,8 @@ struct {
   int lifePoints;
   int gold;
 } player = {
-    .lifePoints = 1000,
-    .gold = 300,
+    .lifePoints = INITIAL_LIFE_POINTS,
+    .gold = INITIAL_GOLD,
 };
 
 // ================================================== FLOATING MENU ==================================================
@@ -462,7 +466,7 @@ void drawTexture(Texture2D texture, Vector2 pos, Vector2 size, float rotation, C
   DrawTexturePro(texture, source, dest, origin, rotation, color);
 }
 
-bool checkClickOn(Rectangle target) {
+bool isClickedOn(Rectangle target) {
   if (CheckCollisionPointRec(gameState.mouse.pos, target) && gameState.mouse.click && !gameState.mouse.clickUsed) {
     gameState.mouse.clickUsed = true;
     return true;
@@ -577,7 +581,7 @@ void resetPathMatrix() {
   }
 }
 
-int checkForNeighbors(int row, int col) {
+int countNeighbors(int row, int col) {
   int count = 0;
   for (int i = 0; i < 4; i++) {
     int nRow = row + dRow[i];
@@ -642,7 +646,7 @@ void buildPathMatrix() {
     int direction = GetRandomValue(0, 3);
     Pos nextPos = (Pos){curPos.row + dRow[direction], curPos.col + dCol[direction]};
 
-    int neighborsCount = checkForNeighbors(nextPos.row, nextPos.col);
+    int neighborsCount = countNeighbors(nextPos.row, nextPos.col);
 
     if (nextPos.row <= firstPathPos.row || nextPos.row >= GRID_ROWS - 2 || nextPos.col < 0 || nextPos.col >= GRID_COLS || neighborsCount > 1) {
       attempts--;
@@ -665,7 +669,7 @@ void buildPathMatrix() {
     }
   } while (attempts > 0);
 
-  if (attempts <= 0 || pathMatrix[endPos.row][endPos.col] || checkForNeighbors(endPos.row, endPos.col) > 1) {
+  if (attempts <= 0 || pathMatrix[endPos.row][endPos.col] || countNeighbors(endPos.row, endPos.col) > 1) {
     buildPathMatrix();
   } else {
     pathMatrix[endPos.row][endPos.col] = 1;
@@ -673,6 +677,8 @@ void buildPathMatrix() {
 }
 
 void buildPath() {
+  pathCount = 0;
+
   int prevCol = -1, prevRow = -1;
   int col = 0, row = 2;
 
@@ -784,30 +790,23 @@ void drawBakedScene() {
   DrawTextureRec(sceneBaked.texture, rec, VECTOR2_ZERO, RAYWHITE);
 }
 
-void nextLevel() {
-  gameState.wave.number = 1;
-  gameState.wave.waitingNext = true;
-  gameState.wave.timer = -1;
-
-  gameState.level.number++;
-  buildPathMatrix();
-  buildPath();
-  bakeScene();
-}
-
 // ================================================== WAVE ==================================================
 
-bool waveEnded() {
+bool isWaveEnded() {
   FOREACH_ACTIVE(enemy, enemies) return false;
   return true;
 }
 
 void computeWaveState(float dt) {
-  if (gameState.enemy.count > (ENEMY_PER_WAVE * gameState.wave.number)) {
+  if (gameState.level.waitingNext) {
+    return;
+  }
+
+  if (gameState.enemy.count > (ENEMIES_PER_WAVE * gameState.wave.number)) {
     gameState.wave.waitingNext = true;
   }
 
-  if (gameState.wave.waitingNext && waveEnded() && gameState.wave.timer < 0) {
+  if (gameState.wave.waitingNext && isWaveEnded() && gameState.wave.timer < 0) {
     gameState.wave.timer = 0;
   }
 
@@ -832,13 +831,12 @@ void spawnEnemy() {
 
   EnemyType enemyType = GetRandomValue(0, ENEMY_TYPE_COUNT - 2);
   EnemyStat defaultStats = enemyStats[enemyType];
-  float statMultiplier = MATH_MAX(gameState.wave.number / 5.0f, 1.0f);
+  float statMultiplier = gameState.level.number / 10.0f + MATH_MAX(gameState.wave.number / 5.0f, 1.0f);
 
   enemy->type = enemyType;
   enemy->pos = path[0];
   enemy->targetIndex = 1;
   enemy->size = Vector2Scale(TILE_AS_VECTOR2, defaultStats.sizeMultiplier);
-  enemy->color = RED;
   enemy->health = defaultStats.health * statMultiplier;
   enemy->speedMultiplier = defaultStats.speedMultiplier;
   enemy->gold = defaultStats.gold;
@@ -960,7 +958,7 @@ void drawTower(Tower *tower) {
   drawTexture(towerTextures[tower->type], tower->pos, tower->size, tower->angle, WHITE);
 
   Rectangle towerRectangle = (Rectangle){tower->pos.x - HALF_TILE, tower->pos.y - HALF_TILE, TILE, TILE};
-  if (checkClickOn(towerRectangle)) {
+  if (isClickedOn(towerRectangle)) {
     currentFloatingMenuOpen.type = FLOATING_MENU_TYPE_TOWER_UPGRADE;
     currentFloatingMenuOpen.entityWrapper = (EntityWrapper){
         .type = ENTITY_WRAPPER_TYPE_TOWER,
@@ -1108,6 +1106,15 @@ void computeBuyTowerUpgradeCommand(CommandCtx ctx) {
   pushNotification(NOTIFICATION_TYPE_TOAST, "Tower Upgraded");
 }
 
+void sellTower(Tower *tower) {
+  tower->active = false;
+  player.gold += towerStats[tower->type].cost * 0.33f;
+}
+
+void sellAllTowers() {
+  FOREACH_ACTIVE(tower, towers) sellTower(tower);
+}
+
 // ================================================== BULLET ==================================================
 
 void spawnBullet(Tower *tower, EntityWrapper target) {
@@ -1187,6 +1194,57 @@ void computeBullet(float dt) {
   computeBulletsMovement(dt);
 }
 
+// ================================================== LEVEL ==================================================
+
+void computeLevelState(float dt) {
+  if (gameState.wave.waitingNext && gameState.wave.number >= WAVES_PER_LEVEL) {
+    gameState.level.waitingNext = true;
+  }
+
+  if (gameState.level.waitingNext && isWaveEnded() && gameState.level.timer < 0) {
+    gameState.level.sceneLoaded = false;
+    gameState.level.timer = 0;
+  }
+
+  if (gameState.level.timer >= 0) {
+    gameState.level.timer += dt;
+
+    if (gameState.level.timer >= HALF_NEXT_LEVEL_TRANSITION_TIMER && !gameState.level.sceneLoaded) {
+      buildPathMatrix();
+      buildPath();
+      bakeScene();
+
+      gameState.level.sceneLoaded = true;
+      gameState.wave.number = 0;
+
+      sellAllTowers();
+    }
+
+    if (gameState.level.timer >= NEXT_LEVEL_TRANSITION_TIMER) {
+      gameState.level.number++;
+      gameState.level.waitingNext = false;
+      gameState.level.timer = -1;
+
+      player.gold += (INITIAL_GOLD * gameState.level.number) / 2;
+    }
+  }
+}
+
+void drawLevelTransition() {
+  if (!gameState.level.waitingNext) {
+    return;
+  }
+
+  Rectangle rec = (Rectangle){
+      .x = 0,
+      .y = TILE * GRID_ROWS * ((gameState.level.timer - HALF_NEXT_LEVEL_TRANSITION_TIMER) / HALF_NEXT_LEVEL_TRANSITION_TIMER),
+      .width = TILE * GRID_COLS,
+      .height = TILE * GRID_ROWS,
+  };
+
+  DrawRectanglePro(rec, VECTOR2_ZERO, 0, GRASS_GREEN);
+}
+
 // ================================================== HUD ==================================================
 
 float drawStat(float x, const char *msg) {
@@ -1203,12 +1261,12 @@ void drawHud() {
   x = drawStat(x, TextFormat("Life: %d", player.lifePoints));
   x = drawStat(x, TextFormat("Wave: %d", gameState.wave.number));
   x = drawStat(x, TextFormat("Gold: %d", player.gold));
-  if (waveEnded()) {
+  if (isWaveEnded()) {
     if (gameState.wave.timer > 0) {
       x = drawStat(x, TextFormat("Next Wave In: %.0f", (NEXT_WAVE_SPAWN_DELAY_IN_SECONDS - gameState.wave.timer)));
     }
   } else {
-    int remainingEnemies = ENEMY_PER_WAVE * gameState.wave.number - gameState.enemy.count + 1;
+    int remainingEnemies = ENEMIES_PER_WAVE * gameState.wave.number - gameState.enemy.count + 1;
     x = drawStat(x, TextFormat("Remaining Enemies To Spawn: %d", remainingEnemies));
   }
 
@@ -1366,7 +1424,7 @@ Vector2 drawBuyTowerWidget(TowerType towerType, Vector2 size, Vector2 drawAt) {
 
   drawBuyTowerWidgetDescription(towerType, towerTexture, drawAt);
 
-  if (checkClickOn(buttonRectangle)) {
+  if (isClickedOn(buttonRectangle)) {
     CommandCtx commandCtx = (CommandCtx){.buyTower = {.towerType = towerType}};
     pushCommand(COMMAND_TYPE_BUY_TOWER, computeBuyTowerCommand, commandCtx);
   }
@@ -1443,7 +1501,7 @@ void drawTowerUpgradeFloatingMenu() {
 
     Rectangle buttonRectangle = drawFloatingMenuButton(rectangleWrapper, BUTTON_LABEL_UPGRADE);
 
-    if (checkClickOn(buttonRectangle)) {
+    if (isClickedOn(buttonRectangle)) {
       CommandCtx commandCtx = (CommandCtx){.buyTowerUpgrade = {currentFloatingMenuOpen.entityWrapper, i}};
       pushCommand(COMMAND_TYPE_BUY_TOWER_UPGRADE, computeBuyTowerUpgradeCommand, commandCtx);
       currentFloatingMenuOpen.type = FLOATING_MENU_TYPE_NONE;
@@ -1585,6 +1643,7 @@ void updateState() {
 
   computeCommands();
   computeSpawnEnemy(dt);
+  computeLevelState(dt);
   computeWaveState(dt);
   computeBullet(dt);
 
@@ -1600,6 +1659,8 @@ void draw() {
   FOREACH_ACTIVE(tower, towers) drawTower(tower);
   drawNotifications();
 
+  drawLevelTransition();
+
   drawHud();
 
   drawPlacement();
@@ -1608,6 +1669,21 @@ void draw() {
 #ifdef DEBUG_ENABLED
   drawDebugGrid();
 #endif
+}
+
+void initState() {
+  gameState.level.number = 1;
+  gameState.level.waitingNext = false;
+  gameState.level.timer = -1;
+  gameState.level.sceneLoaded = true;
+
+  gameState.wave.number = 0;
+  gameState.wave.waitingNext = true;
+  gameState.wave.timer = -1;
+
+  buildPathMatrix();
+  buildPath();
+  bakeScene();
 }
 
 int main(void) {
@@ -1629,12 +1705,9 @@ int main(void) {
   SetExitKey(KEY_BACKSPACE);
 
   loadAssets();
+  initState();
 
   while (!WindowShouldClose()) {
-    if (gameState.level.number == 0) {
-      nextLevel();
-    }
-
     updateState();
 
     BeginDrawing();
